@@ -9,6 +9,7 @@ import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
+from xml.sax.saxutils import unescape as _xml_unescape
 
 from lxml import etree
 
@@ -395,6 +396,10 @@ class XLIFF2DOCXConverter(BaseConverter):
 
         root = etree.fromstring(document_xml.encode("utf-8"))
 
+        # E2E-06b fix: unescape XML entities in target_text before any processing
+        # LiteLLM may return &lt;bx ... &gt; instead of <bx ...>
+        target_text = _xml_unescape(target_text, {'&quot;': '"'})
+
         found = False
         source_normalized = re.sub(r'<[^>]+>', '', source_text) if source_text else ""
 
@@ -488,7 +493,10 @@ class XLIFF2DOCXConverter(BaseConverter):
                     runs[j].text = ""
             return True
 
-        runs[target_run_idx].text = target_text
+        # E2E-06b fix: unescape XML entities in target_text before writing
+        # LiteLLM may return &lt;bx ... &gt; instead of <bx ...>
+        safe_target = _xml_unescape(target_text, {'&quot;': '"'})
+        runs[target_run_idx].text = safe_target
         for j in range(target_run_idx + 1, len(runs)):
             runs[j].text = ""
         return True
