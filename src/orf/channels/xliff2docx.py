@@ -460,19 +460,48 @@ class XLIFF2DOCXConverter(BaseConverter):
         Finds the first run containing source_normalized, replaces it with
         target_text, and clears subsequent runs. Strips XLIFF bx/ex tags and
         applies proper DOCX run formatting.
+
+        E2E-07 fix: when exact match fails, try fuzzy matching if the lengths
+        are close (within 5 chars). This handles cases where the XLIFF source
+        contains content that doesn't exactly match the DOCX paragraph (e.g.
+        missing middle content that was moved to a separate paragraph by the DOCX
+        editor's paragraph-splitting algorithm).
         """
         runs = paragraph.xpath(".//w:t", namespaces=WORD_NS_MAP)
         concat = "".join(r.text or "" for r in runs)
 
-        if source_normalized not in concat:
+        match_pos = concat.find(source_normalized)
+        if match_pos >= 0:
+            # Exact match — use it
+            pass
+        elif len(source_normalized) > 3 and abs(len(source_normalized) - len(concat)) <= 5:
+            # E2E-07 fix: fuzzy match when lengths are close
+            # Try to find the best substring match using sequence similarity
+            best_ratio = 0.0
+            best_pos = -1
+            step = max(1, min(10, len(source_normalized) // 4))
+            # Try matching at different windows of concat
+            for start in range(0, max(1, len(concat) - len(source_normalized) + 10), step):
+                window = concat[start:start + len(source_normalized) + 5]
+                import difflib
+                ratio = difflib.SequenceMatcher(None, source_normalized, window[:len(source_normalized)]).ratio()
+                if ratio > best_ratio and ratio >= 0.85:
+                    best_ratio = ratio
+                    best_pos = start
+            if best_pos >= 0:
+                match_pos = best_pos
+                logger.debug("E2E-07 fuzzy match: ratio=%.2f pos=%d", best_ratio, best_pos)
+        else:
             return False
 
-        pos = concat.find(source_normalized)
+        if match_pos < 0:
+            return False
+
         target_run_idx = None
         for i, r in enumerate(runs):
             run_text = r.text or ""
-            run_start = concat.find(run_text, pos) if run_text else -1
-            if run_start <= pos < run_start + len(run_text) or run_start < 0:
+            run_start = concat.find(run_text, match_pos) if run_text else -1
+            if run_start <= match_pos < run_start + len(run_text) or run_start < 0:
                 target_run_idx = i
                 break
 
