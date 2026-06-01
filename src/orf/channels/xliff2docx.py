@@ -422,6 +422,40 @@ class XLIFF2DOCXConverter(BaseConverter):
                     found = self._backfill_split_runs(p, source_normalized, target_text)
                     break
 
+        # E2E-70: OPP XLIFF extraction sometimes drops whitespace between
+        # adjacent <w:t> runs (e.g. skeleton para "第二章  海尔的全球创牌"
+        # normalizes to XLIFF source "第二章海尔的全球创牌"). The strict substring
+        # match above fails. Try a whitespace-normalized fallback.
+        if not found and source_normalized:
+            for p in root.xpath("//w:p", namespaces=WORD_NS_MAP):
+                text_runs = p.xpath(".//w:t", namespaces=WORD_NS_MAP)
+                concat_text = "".join(t.text or "" for t in text_runs)
+                norm_concat = re.sub(r"\s+", "", concat_text)
+                if not source_normalized:
+                    continue
+                if source_normalized in norm_concat:
+                    formatted = self._build_formatted_runs(target_text)
+                    if formatted and text_runs:
+                        first = text_runs[0]
+                        parent = first.getparent()
+                        if parent is not None:
+                            insert_pos = list(parent).index(first)
+                            for fr in formatted:
+                                parent.insert(insert_pos, fr)
+                                insert_pos += 1
+                            first.text = ""
+                            for j in range(1, len(text_runs)):
+                                text_runs[j].text = ""
+                            found = True
+                            break
+                    elif text_runs:
+                        safe_target = _xml_unescape(target_text, {'&quot;': '"'})
+                        text_runs[0].text = safe_target
+                        for j in range(1, len(text_runs)):
+                            text_runs[j].text = ""
+                        found = True
+                        break
+
         new_xml = etree.tostring(root, encoding="unicode", xml_declaration=False)
         return new_xml
 
@@ -460,48 +494,19 @@ class XLIFF2DOCXConverter(BaseConverter):
         Finds the first run containing source_normalized, replaces it with
         target_text, and clears subsequent runs. Strips XLIFF bx/ex tags and
         applies proper DOCX run formatting.
-
-        E2E-07 fix: when exact match fails, try fuzzy matching if the lengths
-        are close (within 5 chars). This handles cases where the XLIFF source
-        contains content that doesn't exactly match the DOCX paragraph (e.g.
-        missing middle content that was moved to a separate paragraph by the DOCX
-        editor's paragraph-splitting algorithm).
         """
         runs = paragraph.xpath(".//w:t", namespaces=WORD_NS_MAP)
         concat = "".join(r.text or "" for r in runs)
 
-        match_pos = concat.find(source_normalized)
-        if match_pos >= 0:
-            # Exact match — use it
-            pass
-        elif len(source_normalized) > 3 and abs(len(source_normalized) - len(concat)) <= 5:
-            # E2E-07 fix: fuzzy match when lengths are close
-            # Try to find the best substring match using sequence similarity
-            best_ratio = 0.0
-            best_pos = -1
-            step = max(1, min(10, len(source_normalized) // 4))
-            # Try matching at different windows of concat
-            for start in range(0, max(1, len(concat) - len(source_normalized) + 10), step):
-                window = concat[start:start + len(source_normalized) + 5]
-                import difflib
-                ratio = difflib.SequenceMatcher(None, source_normalized, window[:len(source_normalized)]).ratio()
-                if ratio > best_ratio and ratio >= 0.85:
-                    best_ratio = ratio
-                    best_pos = start
-            if best_pos >= 0:
-                match_pos = best_pos
-                logger.debug("E2E-07 fuzzy match: ratio=%.2f pos=%d", best_ratio, best_pos)
-        else:
+        if source_normalized not in concat:
             return False
 
-        if match_pos < 0:
-            return False
-
+        pos = concat.find(source_normalized)
         target_run_idx = None
         for i, r in enumerate(runs):
             run_text = r.text or ""
-            run_start = concat.find(run_text, match_pos) if run_text else -1
-            if run_start <= match_pos < run_start + len(run_text) or run_start < 0:
+            run_start = concat.find(run_text, pos) if run_text else -1
+            if run_start <= pos < run_start + len(run_text) or run_start < 0:
                 target_run_idx = i
                 break
 
