@@ -109,6 +109,27 @@ def _strip_inline_tags(target_text: str) -> str:
     return _INLINE_TAGS_RE.sub('', target_text)
 
 
+def _distribute_text_across_runs(runs: list, target_text: str) -> None:
+    """Distribute target_text across runs, preserving newlines.
+
+    Instead of flattening all text into runs[0] and clearing the rest
+    (which loses ``\\n``), this helper splits on newlines and distributes
+    one line per run.  If there are more lines than runs, extra lines are
+    appended (with ``\\n``) to the last run.  If there are more runs than
+    lines, the tail runs are cleared.
+
+    ORF#12: fixes newline flattening in xliff2docx backfill.
+    """
+    lines = target_text.split('\n')
+    for i, line in enumerate(lines):
+        if i < len(runs):
+            runs[i].text = line
+        else:
+            runs[-1].text += '\n' + line
+    for r in runs[len(lines):]:
+        r.text = ""
+
+
 @dataclass
 class XLIFFTransUnitData:
     """Minimal trans-unit data extracted from XLIFF."""
@@ -748,9 +769,7 @@ class XLIFF2DOCXConverter(BaseConverter):
             para_text = "".join(r.text or "" for r in runs)
             if len(para_text.strip()) < 4:
                 return False
-            runs[0].text = target_text
-            for r in runs[1:]:
-                r.text = ""
+            _distribute_text_across_runs(runs, target_text)
             return True
         return False
 
@@ -823,9 +842,7 @@ class XLIFF2DOCXConverter(BaseConverter):
                 return True
 
         # No bx/ex tags — plain text path (original behavior)
-        runs[0].text = target_text
-        for r in runs[1:]:
-            r.text = ""
+        _distribute_text_across_runs(runs, target_text)
         return True
 
     def _collect_all_paragraphs(
@@ -940,9 +957,7 @@ class XLIFF2DOCXConverter(BaseConverter):
                     r.text = ""
                 return True
 
-        runs[0].text = target_text
-        for r in runs[1:]:
-            r.text = ""
+        _distribute_text_across_runs(runs, target_text)
         return True
 
     def _backfill_fallback_textboxes(
@@ -987,9 +1002,7 @@ class XLIFF2DOCXConverter(BaseConverter):
                     continue
                 runs = p.xpath("./w:r/w:t", namespaces=WORD_NS_MAP_LOCAL)
                 if runs:
-                    runs[0].text = target_text
-                    for r in runs[1:]:
-                        r.text = ""
+                    _distribute_text_across_runs(runs, target_text)
 
     def _fallback_backfill(self, root: etree._Element, target_text: str) -> bool:
         """Last-resort fallback: log a warning and skip.
