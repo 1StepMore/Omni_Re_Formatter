@@ -35,7 +35,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
@@ -83,6 +83,43 @@ _path_validator = PathValidator(
     allowed_directories=_orf_config.allowed_directories or [Path.cwd()],
     max_file_size_bytes=_orf_config.max_file_size_mb * 1024 * 1024,
 )
+
+
+def _error_response(code: str, message: str, **extra: Any) -> dict:
+    """Standardized error response with backward-compat fields."""
+    resp: dict[str, Any] = {
+        "success": False,
+        "error": {"code": code, "message": message},
+        "error_code": code,
+        "message": message,
+    }
+    resp.update(extra)
+    return resp
+
+
+def _success_response(content: dict) -> dict:
+    """Standardized success response wrapping payload under ``content``."""
+    return {"success": True, "content": content}
+
+
+def _augment_error(resp: dict) -> dict:
+    """Add top-level ``error: {code, message}`` to an existing error dict.
+
+    Extracts code/message from ``errors[0]`` if present, preserving all
+    existing fields (backward compat).
+    """
+    if resp.get("success") is True:
+        return resp
+    if "error" not in resp:
+        errors = resp.get("errors", [])
+        if errors and isinstance(errors[0], dict):
+            resp["error"] = {
+                "code": errors[0].get("code", "ORF_ERROR"),
+                "message": errors[0].get("message", "Unknown error"),
+            }
+        else:
+            resp["error"] = {"code": "ORF_ERROR", "message": "Unknown error"}
+    return resp
 
 
 # ─── CLI subprocess helper ─────────────────────────────────────────────
@@ -234,7 +271,7 @@ def apply_md(
     # E2E-76: accept inline markdown via ``content`` alongside the
     # path-based ``input_md`` so text-in/text-out agent flows work.
     if not input_md and not content:
-        return json.dumps({
+        return json.dumps(_augment_error({
             "success": False,
             "output_path": None,
             "errors": [{
@@ -244,9 +281,9 @@ def apply_md(
             }],
             "warnings": [],
             "metadata": {},
-        })
+        }))
     if input_md and content:
-        return json.dumps({
+        return json.dumps(_augment_error({
             "success": False,
             "output_path": None,
             "errors": [{
@@ -256,7 +293,7 @@ def apply_md(
             }],
             "warnings": [],
             "metadata": {},
-        })
+        }))
 
     content_temp_path: str | None = None
     if content is not None:
@@ -273,7 +310,7 @@ def apply_md(
                 f.write(content)
         except Exception as e:
             logger.error("Failed to write inline content to tempfile: %s", e)
-            return json.dumps({
+            return json.dumps(_augment_error({
                 "success": False,
                 "output_path": None,
                 "errors": [{
@@ -283,36 +320,36 @@ def apply_md(
                 }],
                 "warnings": [],
                 "metadata": {},
-            })
+            }))
         input_md = content_temp_path
 
     try:
         result = _path_validator.validate_path(input_md)
         if not result.success:
-            return json.dumps({
+            return json.dumps(_augment_error({
                 "success": False,
                 "output_path": None,
                 "errors": [{"code": "PATH_NOT_ALLOWED", "message": result.error, "recovery_strategy": None}],
                 "warnings": [],
                 "metadata": {}
-            })
+            }))
 
         if output_path:
             result_out = _path_validator.validate_path(output_path, allow_missing=True)
             if not result_out.success:
-                return json.dumps({
+                return json.dumps(_augment_error({
                     "success": False,
                     "output_path": None,
                     "errors": [{"code": "PATH_NOT_ALLOWED", "message": f"output_path: {result_out.error}", "recovery_strategy": None}],
                     "warnings": [],
                     "metadata": {}
-                })
+                }))
 
         for path_param, path_value in (("reference_doc", reference_doc), ("template", template)):
             if path_value:
                 pv = _path_validator.validate_path(path_value, allow_missing=True)
                 if not pv.success:
-                    return json.dumps({
+                    return json.dumps(_augment_error({
                         "success": False,
                         "output_path": None,
                         "errors": [{"code": "PATH_NOT_ALLOWED",
@@ -320,7 +357,7 @@ def apply_md(
                                     "recovery_strategy": None}],
                         "warnings": [],
                         "metadata": {}
-                    })
+                    }))
 
         args = ["apply-md", input_md, "--target-format", target_format]
         if output_path:
@@ -356,7 +393,10 @@ def apply_md(
                 logger.warning("Failed to write images temp file: %s", e)
 
         try:
-            return json.dumps(_run_cli_command(args))
+            cli_result = _run_cli_command(args)
+            if cli_result.get("success"):
+                return json.dumps(_success_response(cli_result))
+            return json.dumps(_augment_error(cli_result))
         finally:
             if images_json_path:
                 _safe_unlink(images_json_path)
@@ -392,7 +432,7 @@ def apply_xliff(
     if images:
         for idx, img_dict in enumerate(images):
             if isinstance(img_dict, dict) and img_dict.get("file_path"):
-                return json.dumps({
+                return json.dumps(_augment_error({
                     "success": False,
                     "output_path": None,
                     "errors": [{
@@ -404,25 +444,25 @@ def apply_xliff(
                     }],
                     "warnings": [],
                     "metadata": {},
-                })
+                }))
     # C5 fix: validate output_path against allowlist before subprocess
     result_out = _path_validator.validate_path(output_path, allow_missing=True)
     if not result_out.success:
-        return json.dumps({
+        return json.dumps(_augment_error({
             "success": False,
             "output_path": None,
             "errors": [{"code": "PATH_NOT_ALLOWED", "message": f"output_path: {result_out.error}"}],
             "warnings": [],
             "metadata": {},
-        })
+        }))
     if xliff_path and xliff_content:
-        return json.dumps({
+        return json.dumps(_augment_error({
             "success": False,
             "output_path": None,
             "errors": [{"code": "MUTUALLY_EXCLUSIVE", "message": "xliff_path and xliff_content are mutually exclusive"}],
             "warnings": [],
             "metadata": {}
-        })
+        }))
 
     xliff_to_use = xliff_path
     xliff_temp_path = None
@@ -438,13 +478,13 @@ def apply_xliff(
         if not result_p.success:
             if xliff_temp_path:
                 _safe_unlink(xliff_temp_path)
-            return json.dumps({
+            return json.dumps(_augment_error({
                 "success": False,
                 "output_path": None,
                 "errors": [{"code": "PATH_NOT_ALLOWED", "message": result_p.error}],
                 "warnings": [],
                 "metadata": {}
-            })
+            }))
 
     args = [
         "apply-xliff", input_file,
@@ -509,7 +549,9 @@ def apply_xliff(
     if xliff_temp_path:
         _safe_unlink(xliff_temp_path)
 
-    return json.dumps(result)
+    if result.get("success"):
+        return json.dumps(_success_response(result))
+    return json.dumps(_augment_error(result))
 
 
 def batch_convert(input_dir: str, target_format: str, pattern: str = "*.md", auth_token: Optional[str] = None) -> str:
@@ -524,15 +566,16 @@ def batch_convert(input_dir: str, target_format: str, pattern: str = "*.md", aut
         return json.dumps(auth_failure_response(), ensure_ascii=False)
     result_dir = _path_validator.validate_path(input_dir, allow_missing=True)
     if not result_dir.success:
-        return json.dumps({
-            "success_count": 0,
-            "fail_count": 0,
-            "total": 0,
-            "errors": [{"code": "PATH_NOT_ALLOWED", "message": result_dir.error, "recovery_strategy": None}]
-        })
+        return json.dumps(_error_response(
+            "PATH_NOT_ALLOWED", result_dir.error or "Path validation failed",
+            content={"success_count": 0, "fail_count": 0, "total": 0},
+        ))
 
     args = ["convert-batch", input_dir, "--target-format", target_format, "--pattern", pattern]
-    return json.dumps(_run_cli_command(args))
+    cli_result = _run_cli_command(args)
+    if cli_result.get("success"):
+        return json.dumps(_success_response(cli_result))
+    return json.dumps(_augment_error(cli_result))
 
 
 def detect_format(file_path: str, auth_token: Optional[str] = None) -> str:
@@ -547,11 +590,16 @@ def detect_format(file_path: str, auth_token: Optional[str] = None) -> str:
         return json.dumps(auth_failure_response(), ensure_ascii=False)
     result_df = _path_validator.validate_path(file_path)
     if not result_df.success:
-        return json.dumps({"format": "UNKNOWN", "confidence": 0.0})
+        return json.dumps(_error_response(
+            "PATH_NOT_ALLOWED", result_df.error or "Path validation failed",
+            content={"format": "UNKNOWN", "confidence": 0.0},
+        ))
 
     args = ["info", file_path]
     result = _run_cli_command(args)
-    return json.dumps({"format": result.get("format", "UNKNOWN"), "confidence": 1.0})
+    return json.dumps(_success_response({
+        "format": result.get("format", "UNKNOWN"), "confidence": 1.0,
+    }))
 
 
 def info(file_path: str, auth_token: Optional[str] = None) -> str:
@@ -566,14 +614,20 @@ def info(file_path: str, auth_token: Optional[str] = None) -> str:
         return json.dumps(auth_failure_response(), ensure_ascii=False)
     result_info = _path_validator.validate_path(file_path)
     if not result_info.success:
-        return json.dumps({
-            "format": "UNKNOWN",
-            "size_mb": 0.0,
-            "resource_count": None,
-            "manifest_status": "error"
-        })
+        return json.dumps(_error_response(
+            "PATH_NOT_ALLOWED", result_info.error or "Path validation failed",
+            content={
+                "format": "UNKNOWN",
+                "size_mb": 0.0,
+                "resource_count": None,
+                "manifest_status": "error",
+            },
+        ))
 
-    return json.dumps(_run_cli_command(["info", file_path]))
+    cli_result = _run_cli_command(["info", file_path])
+    if cli_result.get("success"):
+        return json.dumps(_success_response(cli_result))
+    return json.dumps(_augment_error(cli_result))
 
 
 def ping(auth_token: Optional[str] = None) -> str:
@@ -588,7 +642,7 @@ def ping(auth_token: Optional[str] = None) -> str:
         return json.dumps(auth_failure_response(), ensure_ascii=False)
     from orf import __version__ as _orf_version
     return json.dumps(
-        {"success": True, "module": "orf", "version": _orf_version},
+        _success_response({"module": "orf", "version": _orf_version}),
         ensure_ascii=False,
     )
 
@@ -874,6 +928,10 @@ def _orf_classify_status(payload: Any) -> str:
     if payload.get("success") is True:
         return _ORF_STATUS_SUCCESS
     code = payload.get("error_code")
+    if not code:
+        err = payload.get("error")
+        if isinstance(err, dict):
+            code = err.get("code")
     if code == "RATE_LIMITED":
         return _ORF_STATUS_RATE_LIMITED
     if code == "AUTH_FAILED":

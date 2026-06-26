@@ -10,7 +10,17 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from orf.mcp.server import get_server, _run_cli_command
+from orf.mcp.server import (
+    get_server,
+    _run_cli_command,
+    _call_tool,
+    apply_md,
+    apply_xliff,
+    batch_convert,
+    detect_format,
+    info,
+    ping,
+)
 from orf.mcp.security import PathValidator
 
 
@@ -103,11 +113,11 @@ class TestRunCLICommand:
 
 
 class TestApplyMdTool:
-    """Tests for apply_md MCP tool."""
-    
+    """Tests for apply_md MCP tool (FastMCP 3.x: in-process function aliases)."""
+
     @patch("subprocess.run")
-    def test_apply_md_success(self, mock_run):
-        """apply_md should return success on valid input."""
+    def test_apply_md_success(self, mock_run, tmp_path):
+        """apply_md blocks path traversal; valid path returns tool result."""
         mock_run.return_value = MagicMock(
             returncode=0,
             stdout=json.dumps({
@@ -115,127 +125,139 @@ class TestApplyMdTool:
                 "output_path": "/tmp/result.docx",
                 "errors": [],
                 "warnings": [],
-                "metadata": {}
-            })
+                "metadata": {},
+            }),
         )
-        
-        from orf.mcp.server import _register_tools, _mcp
-        import orf.mcp.server as server_module
-        
-        # Get the tool function
-        server = get_server()
-        
-        # Test path validation blocks traversal
-        result = asyncio.run(server.call_tool("apply_md", {
-            "input_md": "../../etc/passwd",
-            "target_format": "docx"
-        }))
-        result_data = json.loads(result.content[0].text)
+
+        result_str = apply_md(input_md="../../etc/passwd", target_format="docx")
+        result_data = json.loads(result_str)
         assert result_data["success"] is False
-        assert "PATH_NOT_ALLOWED" in str(result_data["errors"])
+        assert "PATH_NOT_ALLOWED" in str(result_data.get("errors", []))
+        assert "error" in result_data
+        assert result_data["error"]["code"] == "PATH_NOT_ALLOWED"
 
 
 class TestApplyXLIFFTool:
     """Tests for apply_xliff MCP tool."""
-    
+
     def test_apply_xliff_path_validation(self):
         """apply_xliff should validate paths."""
-        server = get_server()
-        
-        result = asyncio.run(server.call_tool("apply_xliff", {
-            "input_file": "../../etc/passwd",
-            "xliff_path": "test.xlf",
-            "output_path": "out.docx",
-            "format": "docx"
-        }))
-        result_data = json.loads(result.content[0].text)
+        result_str = apply_xliff(
+            input_file="../../etc/passwd",
+            xliff_path="test.xlf",
+            output_path="out.docx",
+            format="docx",
+        )
+        result_data = json.loads(result_str)
         assert result_data["success"] is False
+        assert "error" in result_data
+        assert isinstance(result_data["error"], dict)
+        assert "code" in result_data["error"]
 
 
 class TestBatchConvertTool:
     """Tests for batch_convert MCP tool."""
-    
+
     def test_batch_convert_invalid_path(self):
         """batch_convert should handle invalid paths."""
-        server = get_server()
-        
-        result = asyncio.run(server.call_tool("batch_convert", {
-            "input_dir": "../../dangerous",
-            "target_format": "docx",
-            "pattern": "*.md"
-        }))
-        result_data = json.loads(result.content[0].text)
-        assert result_data["success_count"] == 0
-        assert len(result_data["errors"]) > 0
+        result_str = batch_convert(
+            input_dir="../../dangerous",
+            target_format="docx",
+            pattern="*.md",
+        )
+        result_data = json.loads(result_str)
+        assert result_data.get("success") is False
+        content = result_data.get("content", {})
+        assert content.get("success_count", 0) == 0
+        assert "error" in result_data
+        assert isinstance(result_data["error"], dict)
+        assert result_data["error"]["code"] == "PATH_NOT_ALLOWED"
+        assert "message" in result_data["error"]
 
 
 class TestDetectFormatTool:
     """Tests for detect_format MCP tool."""
-    
+
     def test_detect_format_invalid_path(self):
         """detect_format should handle invalid paths."""
-        server = get_server()
-        
-        result = asyncio.run(server.call_tool("detect_format", {
-            "file_path": "../../etc/passwd"
-        }))
-        result_data = json.loads(result.content[0].text)
-        assert result_data["format"] == "UNKNOWN"
-        assert result_data["confidence"] == 0.0
+        result_str = detect_format(file_path="../../etc/passwd")
+        result_data = json.loads(result_str)
+        assert result_data.get("success") is False
+        content = result_data.get("content", {})
+        assert content.get("format") == "UNKNOWN"
+        assert content.get("confidence") == 0.0
+        assert "error" in result_data
+        assert isinstance(result_data["error"], dict)
+        assert "code" in result_data["error"]
 
 
 class TestInfoTool:
     """Tests for info MCP tool."""
-    
+
     def test_info_invalid_path(self):
         """info should handle invalid paths."""
-        server = get_server()
-        
-        result = asyncio.run(server.call_tool("info", {
-            "file_path": "../../etc/passwd"
-        }))
-        result_data = json.loads(result.content[0].text)
-        assert result_data["manifest_status"] == "error"
+        result_str = info(file_path="../../etc/passwd")
+        result_data = json.loads(result_str)
+        assert result_data.get("success") is False
+        content = result_data.get("content", {})
+        assert content.get("manifest_status") == "error"
+        assert "error" in result_data
+        assert isinstance(result_data["error"], dict)
+        assert "code" in result_data["error"]
 
 
 class TestMCPIntegration:
     """Full integration tests."""
-    
+
     def test_server_starts(self):
         """MCP server should start without error."""
         server = get_server()
         assert server is not None
-    
-    @patch("subprocess.run")
-    def test_full_apply_md_flow(self, mock_run):
-        """Test complete apply_md flow with mocked CLI."""
-        # Create a temp file inside the project root so it passes the
-        # directory allowlist check (default allowed_dir = cwd).
-        import tempfile
-        fd, input_path = tempfile.mkstemp(suffix=".md", prefix="orf_test_", dir=Path.cwd())
-        try:
-            os.close(fd)
-            mock_run.return_value = MagicMock(
-                returncode=0,
-                stdout=json.dumps({
-                    "success": True,
-                    "output_path": "/tmp/result.docx",
-                    "errors": [],
-                    "warnings": [],
-                    "metadata": {"format": "docx"}
-                })
+
+    def test_ping_returns_content_wrapper(self):
+        """ping must return {success: True, content: {module, version}}."""
+        result_data = json.loads(ping())
+        assert result_data.get("success") is True
+        assert "content" in result_data
+        assert isinstance(result_data["content"], dict)
+        assert "module" in result_data["content"]
+        assert "version" in result_data["content"]
+        assert result_data["content"]["module"] == "orf"
+        for key in result_data:
+            assert key in {"success", "content", "metadata"}, (
+                f"Unexpected top-level key: {key}"
             )
 
-            server = get_server()
-            result = asyncio.run(server.call_tool("apply_md", {
-                "input_md": input_path,
-                "target_format": "docx"
-            }))
-            result_data = json.loads(result.content[0].text)
+    @patch("subprocess.run")
+    def test_full_apply_md_flow(self, mock_run, tmp_path, monkeypatch):
+        """Test complete apply_md flow with mocked CLI subprocess."""
+        import orf.mcp.server as server_module
+        monkeypatch.setattr(
+            server_module._path_validator,
+            "allowed_directories",
+            [tmp_path.resolve()],
+        )
+        input_path = tmp_path / "input.md"
+        input_path.write_text("# test\n", encoding="utf-8")
 
-            assert result_data["success"] is True
-        finally:
-            try:
-                os.unlink(input_path)
-            except OSError:
-                pass
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout=json.dumps({
+                "success": True,
+                "output_path": "/tmp/result.docx",
+                "errors": [],
+                "warnings": [],
+                "metadata": {"format": "docx"},
+            }),
+        )
+
+        result_blocks = asyncio.run(
+            _call_tool("apply_md", {
+                "input_md": str(input_path),
+                "target_format": "docx",
+            })
+        )
+        result_data = json.loads(result_blocks[0].text)
+        assert result_data["success"] is True
+        assert "content" in result_data
+        assert isinstance(result_data["content"], dict)
