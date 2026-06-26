@@ -114,3 +114,6 @@ class ConverterOptions:
     target_lang: str | None = None
     exclude: list | None = None
     timestamp: bool = False
+
+    # xliff→pdf (skeleton HTML from OPP extraction)
+    skeleton_html: str | None = None

@@ -701,7 +701,7 @@ def convert_batch(
 @click.option(
     "--format",
     "-f",
-    type=click.Choice(["docx", "pptx", "epub", "html", "odt"]),
+    type=click.Choice(["docx", "pptx", "epub", "html", "odt", "pdf"]),
     default="docx",
     help="Output format",
 )

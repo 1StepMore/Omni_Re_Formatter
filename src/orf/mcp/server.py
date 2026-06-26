@@ -417,6 +417,7 @@ def apply_xliff(
     max_file_size_mb: Optional[float] = None,
     auth_token: Optional[str] = None,
     traceparent: Optional[str] = None,
+    skeleton_html: Optional[str] = None,
 ) -> str:
     # H5: token bucket rate limiter
     rate_ok, rate_err = check_rate_limit()
@@ -498,6 +499,17 @@ def apply_xliff(
         args.append("--no-cache")
     if max_file_size_mb is not None:
         args.extend(["--max-file-size-mb", str(max_file_size_mb)])
+    if skeleton_html:
+        sh_result = _path_validator.validate_path(skeleton_html)
+        if not sh_result.success:
+            return json.dumps(_augment_error({
+                "success": False,
+                "output_path": None,
+                "errors": [{"code": "PATH_NOT_ALLOWED", "message": f"skeleton_html: {sh_result.error}"}],
+                "warnings": [],
+                "metadata": {},
+            }))
+        args.extend(["--skeleton-html", skeleton_html])
 
     temp_created = False
     temp_path = ""
