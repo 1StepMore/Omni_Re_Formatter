@@ -1,7 +1,7 @@
 # AGENTS.md — Omni_Re_Formatter (ORF)
 
 Developer + agent context for the **ORF** sub-repo. The suite-level
-[Omni_Suite AGENTS.md](../AGENTS.md) covers cross-module
+[suite-level AGENTS.md](https://github.com/1StepMore/e2e-test-suite/blob/main/AGENTS.md) covers cross-module
 orchestration (OPP → OL → ORF); this file is for working **inside**
 ORF.
 
@@ -12,7 +12,7 @@ ORF.
 ## Quick start
 
 ```bash
-# Install (from Omni_Suite root)
+# Install
 bash scripts/setup_dev.sh
 
 # CLI: convert MD → DOCX
@@ -93,9 +93,9 @@ src/orf/
 | `info` | Document format + size + resource count + manifest status |
 | `ping` | Health check (returns version) |
 
-For full per-tool parameter reference, see
-`docs/API.md` in the suite root, or the suite-level
-`AGENTS.md → MCP Tool Reference` table.
+For full per-tool parameter reference, see the suite-level
+[AGENTS.md → MCP Tool Reference](https://github.com/1StepMore/e2e-test-suite/blob/main/AGENTS.md) table,
+or [agent-pipeline-guide.md](https://github.com/1StepMore/e2e-test-suite/blob/main/docs/agent-pipeline-guide.md).
 
 ## 16 output formats + their conversion engines
 
@@ -151,7 +151,7 @@ export ORF_ALLOWED_DIRECTORIES="/path/to/docs:/path/to/output"
 this explicitly to avoid unintended directory access.
 
 **Note:** The env var name differs from OPP (`OPP_MCP_ALLOWED_DIRS`). 
-See `Omni_Suite/docs/agent-pipeline-guide.md` for a cross-server comparison.
+See [agent-pipeline-guide.md](https://github.com/1StepMore/e2e-test-suite/blob/main/docs/agent-pipeline-guide.md) for a cross-server comparison.
 
 ## PathValidator security model
 
@@ -271,12 +271,12 @@ most common agent mistake.
 will warn that formats don't match but proceed.
 
 **Full pipeline comparison**: See the suite-level
-[Pipeline Selection Strategy](../README.md#pipeline-selection-strategy)
+[Pipeline Selection Strategy](https://github.com/1StepMore/e2e-test-suite/blob/main/README.md#pipeline-selection-strategy)
 for the complete decision tree and format support matrix.
 
 ## Pointers to the suite-level docs
 
-- Cross-module orchestration: [Omni_Suite AGENTS.md](../AGENTS.md) (in the monorepo root)
-- MCP tool full parameter reference: [Omni_Suite docs/API.md](../docs/API.md)
-- Pre-commit hooks: [Omni_Suite .pre-commit-config.yaml](../.pre-commit-config.yaml)
-- Compatibility matrix: [Omni_Suite COMPATIBILITY.md](../COMPATIBILITY.md)
+- Cross-module orchestration: [AGENTS.md](https://github.com/1StepMore/e2e-test-suite/blob/main/AGENTS.md)
+- MCP tool full parameter reference: [agent-pipeline-guide.md](https://github.com/1StepMore/e2e-test-suite/blob/main/docs/agent-pipeline-guide.md)
+- Pre-commit hooks: [.pre-commit-config.yaml](https://github.com/1StepMore/e2e-test-suite/blob/main/.pre-commit-config.yaml)
+- Compatibility matrix: [COMPATIBILITY.md](https://github.com/1StepMore/e2e-test-suite/blob/main/COMPATIBILITY.md)

@@ -1,6 +1,6 @@
 [project]
 name = "omni-re-formatter"
-version = "0.4.12"
+version = "0.4.13"
 description = "Omni-Re-Formatter: 将本地化后的 MD/XLIFF 还原为目标复杂格式"
 readme = "README.md"
 requires-python = ">=3.13"
