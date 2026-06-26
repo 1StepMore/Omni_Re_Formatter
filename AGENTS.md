@@ -1,7 +1,7 @@
 # AGENTS.md — Omni_Re_Formatter (ORF)
 
 Developer + agent context for the **ORF** sub-repo. The suite-level
-[Omni_Suite AGENTS.md](https://github.com/1StepMore/Omni_Suite/blob/main/AGENTS.md) covers cross-module
+[Omni_Suite AGENTS.md](../AGENTS.md) covers cross-module
 orchestration (OPP → OL → ORF); this file is for working **inside**
 ORF.
 
@@ -271,12 +271,12 @@ most common agent mistake.
 will warn that formats don't match but proceed.
 
 **Full pipeline comparison**: See the suite-level
-[Pipeline Selection Strategy](https://github.com/1StepMore/Omni_Suite/blob/main/README.md#pipeline-selection-strategy)
+[Pipeline Selection Strategy](../README.md#pipeline-selection-strategy)
 for the complete decision tree and format support matrix.
 
 ## Pointers to the suite-level docs
 
-- Cross-module orchestration: [Omni_Suite AGENTS.md](https://github.com/1StepMore/Omni_Suite/blob/main/AGENTS.md) (in the monorepo root)
-- MCP tool full parameter reference: [Omni_Suite docs/API.md](https://github.com/1StepMore/Omni_Suite/blob/main/docs/API.md)
-- Pre-commit hooks: [Omni_Suite .pre-commit-config.yaml](https://github.com/1StepMore/Omni_Suite/blob/main/.pre-commit-config.yaml)
-- Compatibility matrix: [Omni_Suite COMPATIBILITY.md](https://github.com/1StepMore/Omni_Suite/blob/main/COMPATIBILITY.md)
+- Cross-module orchestration: [Omni_Suite AGENTS.md](../AGENTS.md) (in the monorepo root)
+- MCP tool full parameter reference: [Omni_Suite docs/API.md](../docs/API.md)
+- Pre-commit hooks: [Omni_Suite .pre-commit-config.yaml](../.pre-commit-config.yaml)
+- Compatibility matrix: [Omni_Suite COMPATIBILITY.md](../COMPATIBILITY.md)
