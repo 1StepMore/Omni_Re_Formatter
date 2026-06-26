@@ -26,6 +26,13 @@ logger = get_logger("channel.xliff2html")
 # runs. NULL bytes guarantee no real translation will collide.
 _INLINE_TRANSLATION_SENTINEL = "\x00TRANSLATED_TEXT\x00"
 
+# Tags that are always preserved when injecting translations into the DOM.
+# These are structural elements that carry content independent of the text
+# being translated and should never be removed during backfill.
+_PRESERVED_CHILD_TAGS = frozenset({
+    "img", "br", "hr", "input", "video", "audio", "source", "a",
+})
+
 
 class XLIFF2HTMLConverter(BaseConverter):
     """XLIFF to HTML backfill converter with inline formatting preservation.
@@ -405,11 +412,14 @@ class XLIFF2HTMLConverter(BaseConverter):
         """Replace the text/children of every ``data-trans-unit-id`` node.
 
         Each value in ``translations`` is either a plain ``str`` (set as the
-        node's ``.text``) or a list of lxml elements parsed from
-        inline-formatted HTML (appended as children of the target node).
-        Sibling elements and attributes are preserved verbatim. Any literal
-        ``[unit_id]`` substring in the template is left untouched — it is
-        no longer part of the contract.
+        node's ``.text``, preserving all child elements) or a list of lxml
+        elements parsed from inline-formatted HTML (appended as children
+        of the target node after removing disposable formatting children).
+        Structural child elements (<img>, <a>, <br>, etc.) defined in
+        ``_PRESERVED_CHILD_TAGS`` are always preserved. Sibling elements and
+        attributes are preserved verbatim. Any literal ``[unit_id]`` substring
+        in the template is left untouched — it is no longer part of the
+        contract.
         """
         if not translations:
             return
@@ -418,12 +428,13 @@ class XLIFF2HTMLConverter(BaseConverter):
             unit_id = node.get("data-trans-unit-id")
             if unit_id is None or unit_id not in translations:
                 continue
-            for child in list(node):
-                node.remove(child)
             payload = translations[unit_id]
             if isinstance(payload, str):
                 node.text = payload
             else:
+                for child in list(node):
+                    if child.tag not in _PRESERVED_CHILD_TAGS:
+                        node.remove(child)
                 for element in payload:
                     node.append(element)
 
