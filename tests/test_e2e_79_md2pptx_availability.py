@@ -11,10 +11,16 @@ install, so they hit a wall.
 The fix: pre-flight ``shutil.which('md2pptx')`` check that fails
 fast with an actionable install hint covering the three known paths
 (.NET SDK tool, GitHub release binary, or pandoc fallback).
+
+ORF#7 update: when md2pptx is missing but pandoc IS available,
+the converter now falls back to pandoc automatically (success=True
+with metadata noting the fallback). The install hint is only shown
+when BOTH tools are missing.
 """
 from __future__ import annotations
 
 from pathlib import Path
+from subprocess import CompletedProcess
 
 import pytest
 
@@ -53,9 +59,8 @@ class TestMd2PptxPreFlight:
     def test_missing_binary_returns_failure_with_hint(
         self, input_md: Path, output_path: Path, monkeypatch
     ):
-        """E2E-79: when md2pptx is not on PATH, the converter must
-        return a failure with the install hint (not a bare
-        FileNotFoundError from subprocess)."""
+        """E2E-79: when BOTH md2pptx AND pandoc are missing, the converter
+        must return a failure with the install hint."""
         from orf.channels import md2pptx as md2pptx_mod
 
         monkeypatch.setattr(md2pptx_mod.shutil, "which", lambda _: None)
@@ -65,9 +70,7 @@ class TestMd2PptxPreFlight:
         err = result.errors[0]
         err_str = getattr(err, "message", None) or str(err)
         assert "md2pptx" in err_str
-        # Must mention at least one install path
         assert "dotnet" in err_str or "github.com" in err_str
-        # Output file must NOT have been created
         assert not output_path.exists(), (
             f"Output file must not be created on failure. "
             f"Exists: {output_path}"
@@ -86,9 +89,7 @@ class TestMd2PptxPreFlight:
 
         def fake_run(cmd, **kwargs):
             calls.append(cmd)
-            # Create the output file to simulate a successful run
             Path(cmd[2]).write_bytes(b"fake pptx")
-            from subprocess import CompletedProcess
             return CompletedProcess(cmd, 0, stdout="ok", stderr="")
 
         monkeypatch.setattr(md2pptx_mod.shutil, "which", fake_which)
@@ -97,3 +98,34 @@ class TestMd2PptxPreFlight:
         assert calls, "subprocess.run should have been called"
         assert calls[0][0] == "md2pptx"
         assert result.success is True
+
+    def test_pandoc_fallback_when_md2pptx_missing(
+        self, input_md: Path, output_path: Path, monkeypatch
+    ):
+        """ORF#7: when md2pptx is missing but pandoc is available,
+        the converter falls back to pandoc and returns success."""
+        from orf.channels import md2pptx as md2pptx_mod
+
+        calls: list[list[str]] = []
+
+        def fake_which(name: str) -> str | None:
+            if name == "md2pptx":
+                return None
+            if name == "pandoc":
+                return "/usr/bin/pandoc"
+            return None
+
+        def fake_run(cmd, **kwargs):
+            calls.append(cmd)
+            idx = cmd.index("-o")
+            Path(cmd[idx + 1]).write_bytes(b"fake pptx")
+            return CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        monkeypatch.setattr(md2pptx_mod.shutil, "which", fake_which)
+        monkeypatch.setattr(md2pptx_mod.subprocess, "run", fake_run)
+        result = MD2PPTXConverter().convert(input_md, output_path)
+        assert result.success is True
+        assert result.metadata.get("tool") == "pandoc"
+        assert result.metadata.get("fallback_from") == "md2pptx"
+        assert calls, "subprocess.run should have been called for pandoc"
+        assert "pandoc" in calls[0]

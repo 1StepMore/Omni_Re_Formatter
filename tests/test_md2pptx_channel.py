@@ -1,11 +1,20 @@
 """MD to PPTX channel tests."""
 
+import shutil
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 import pytest
 from orf.channels.md2pptx import MD2PPTXConverter
 from orf.converters.base import ConversionResult
+
+
+# E2E-79: convert() does a shutil.which() pre-flight before subprocess.run,
+# so @patch("subprocess.run") alone doesn't bypass it. Skip when missing.
+_md2pptx_missing = shutil.which("md2pptx") is None
+_md2pptx_skip = pytest.mark.skipif(
+    _md2pptx_missing, reason="md2pptx binary not on PATH (see E2E-79 install hint)"
+)
 
 
 @pytest.fixture
@@ -48,6 +57,7 @@ class TestMD2PPTXConverter:
         converter = MD2PPTXConverter()
         assert converter.validate_input("/nonexistent/file.md") is False
 
+    @_md2pptx_skip
     @patch("subprocess.run")
     def test_convert_success(self, mock_run, sample_md: Path, tmp_path: Path):
         output = tmp_path / "output.pptx"
@@ -68,6 +78,7 @@ class TestMD2PPTXConverter:
         # md2pptx uses positional args: md2pptx <input> <output>  (no -o flag)
         assert call_args[-1] == str(output)
 
+    @_md2pptx_skip
     @patch("subprocess.run")
     def test_convert_md2pptx_error(self, mock_run, sample_md: Path, tmp_path: Path):
         from subprocess import CalledProcessError
@@ -84,6 +95,7 @@ class TestMD2PPTXConverter:
         assert len(result.errors) > 0
         assert "md2pptx error" in result.errors[0].message
 
+    @_md2pptx_skip
     @patch("subprocess.run")
     def test_convert_md2pptx_not_found(self, mock_run, sample_md: Path, tmp_path: Path):
         output = tmp_path / "output.pptx"
@@ -104,3 +116,79 @@ class TestMD2PPTXConverter:
 
         assert result.success is False
         assert "Invalid input file" in result.errors[0].message
+
+    def test_convert_falls_back_to_pandoc_when_md2pptx_missing(
+        self, sample_md: Path, tmp_path: Path
+    ):
+        """ORF#7: when md2pptx is missing but pandoc is available,
+        the converter should fall back to pandoc and return success."""
+        from subprocess import CompletedProcess
+        from orf.channels import md2pptx as md2pptx_mod
+
+        output = tmp_path / "output.pptx"
+
+        def fake_which(name: str) -> str | None:
+            if name == "md2pptx":
+                return None
+            if name == "pandoc":
+                return "/usr/bin/pandoc"
+            return None
+
+        def fake_run(cmd, **kwargs):
+            Path(cmd[cmd.index("-o") + 1]).write_bytes(b"fake pptx")
+            return CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        monkeypatch_ctx = patch.object(md2pptx_mod.shutil, "which", side_effect=fake_which)
+        mock_run_ctx = patch.object(md2pptx_mod.subprocess, "run", side_effect=fake_run)
+
+        with monkeypatch_ctx, mock_run_ctx:
+            converter = MD2PPTXConverter()
+            result = converter.convert(sample_md, output)
+
+        assert result.success is True
+        assert result.metadata.get("tool") == "pandoc"
+        assert result.metadata.get("fallback_from") == "md2pptx"
+
+    def test_convert_fails_when_both_md2pptx_and_pandoc_missing(
+        self, sample_md: Path, tmp_path: Path
+    ):
+        """ORF#7: when both md2pptx AND pandoc are missing,
+        the converter should return the install hint error."""
+        from orf.channels import md2pptx as md2pptx_mod
+
+        output = tmp_path / "output.pptx"
+
+        with patch.object(md2pptx_mod.shutil, "which", return_value=None):
+            converter = MD2PPTXConverter()
+            result = converter.convert(sample_md, output)
+
+        assert result.success is False
+        err_str = getattr(result.errors[0], "message", None) or str(result.errors[0])
+        assert "install" in err_str.lower() or "md2pptx" in err_str
+
+    def test_convert_still_uses_md2pptx_when_available(
+        self, sample_md: Path, tmp_path: Path
+    ):
+        """ORF#7: when md2pptx IS available, the converter should
+        still use md2pptx (primary path unchanged)."""
+        from subprocess import CompletedProcess
+        from orf.channels import md2pptx as md2pptx_mod
+
+        output = tmp_path / "output.pptx"
+
+        def fake_which(name: str) -> str | None:
+            if name == "md2pptx":
+                return "/usr/bin/md2pptx"
+            return None
+
+        def fake_run(cmd, **kwargs):
+            Path(str(output)).write_bytes(b"fake pptx")
+            return CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        with patch.object(md2pptx_mod.shutil, "which", side_effect=fake_which), \
+             patch.object(md2pptx_mod.subprocess, "run", side_effect=fake_run):
+            converter = MD2PPTXConverter()
+            result = converter.convert(sample_md, output)
+
+        assert result.success is True
+        assert result.metadata.get("tool") == "md2pptx"

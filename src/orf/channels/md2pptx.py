@@ -51,6 +51,63 @@ class MD2PPTXConverter(BaseConverter):
         input_path = Path(input_path)
         return input_path.exists() and input_path.suffix.lower() == ".md"
 
+    def _convert_via_pandoc(
+        self, input_path: Path, output_path: Path
+    ) -> ConversionResult:
+        """Fallback: convert MD to PPTX via pandoc when md2pptx is unavailable."""
+        warning_msg = (
+            "md2pptx not found, using pandoc fallback — quality may differ"
+        )
+        logger.warning(warning_msg)
+        cmd = ["pandoc", str(input_path), "-o", str(output_path)]
+        try:
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=60
+            )
+            result.check_returncode()
+            return ConversionResult(
+                output_path=output_path,
+                success=True,
+                metadata={
+                    "tool": "pandoc",
+                    "fallback_from": "md2pptx",
+                    "warning": warning_msg,
+                },
+            )
+        except subprocess.CalledProcessError as e:
+            return ConversionResult(
+                output_path=output_path,
+                success=False,
+                errors=[
+                    {
+                        "code": "PANDOC_FAILED",
+                        "message": f"pandoc conversion failed: {e.stderr.strip()}",
+                    }
+                ],
+            )
+        except FileNotFoundError:
+            return ConversionResult(
+                output_path=output_path,
+                success=False,
+                errors=[
+                    {
+                        "code": "PANDOC_NOT_FOUND",
+                        "message": "pandoc binary not found after pre-flight check",
+                    }
+                ],
+            )
+        except subprocess.TimeoutExpired:
+            return ConversionResult(
+                output_path=output_path,
+                success=False,
+                errors=[
+                    {
+                        "code": "PANDOC_TIMEOUT",
+                        "message": "pandoc conversion timed out after 60 seconds",
+                    }
+                ],
+            )
+
     def convert(
         self,
         input_path: Path | str,
@@ -71,7 +128,11 @@ class MD2PPTXConverter(BaseConverter):
         # code relied on FileNotFoundError being raised by subprocess.run
         # which gave no actionable guidance. Now we surface the install
         # hint up front.
+        # ORF#7: if md2pptx is missing but pandoc is available, fall back
+        # to pandoc automatically (graceful degradation).
         if shutil.which("md2pptx") is None:
+            if shutil.which("pandoc") is not None:
+                return self._convert_via_pandoc(input_path, output_path)
             hint = _md2pptx_install_hint()
             logger.error(hint)
             return ConversionResult(
