@@ -137,6 +137,22 @@ For full per-tool parameter reference, see
 | `OMNI_TEST_FAKE_LLM=1` | unset | Mock LLM responses (only affects tests). |
 | `OMNI_TEST_FAKE_PANDOC=1` | unset | Bypass pandoc subprocess (use `markdown` lib instead). |
 
+## Path Configuration (MCP Server)
+
+The ORF MCP server uses `ORF_ALLOWED_DIRECTORIES` to restrict file 
+system access during format conversion.
+
+```bash
+export ORF_ALLOWED_DIRECTORIES="/path/to/docs:/path/to/output"
+```
+
+**Fallback behavior:** If unset, ORF defaults to `[Path.cwd()]` 
+(the current working directory). For production use, always set 
+this explicitly to avoid unintended directory access.
+
+**Note:** The env var name differs from OPP (`OPP_MCP_ALLOWED_DIRS`). 
+See `Omni_Suite/docs/agent-pipeline-guide.md` for a cross-server comparison.
+
 ## PathValidator security model
 
 The `orf.mcp.security.PathValidator` (in `src/orf/mcp/security.py`)
