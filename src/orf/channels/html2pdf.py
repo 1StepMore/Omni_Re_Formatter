@@ -47,12 +47,16 @@ class HTML2PDFConverter(BaseConverter):
                 errors=["WeasyPrint not installed. Install with: pip install weasyprint"],
             )
 
-        from weasyprint import HTML
+        from weasyprint import CSS, HTML
 
         try:
             logger.info(f"WeasyPrint: Converting {input_path} -> {output_path}")
             output_path.parent.mkdir(parents=True, exist_ok=True)
-            HTML(str(input_path)).write_pdf(str(output_path))
+            pdf_kwargs: dict = {}
+            opts = options or ConverterOptions()
+            if opts.css:
+                pdf_kwargs["stylesheets"] = [CSS(string=opts.css)]
+            HTML(str(input_path)).write_pdf(str(output_path), **pdf_kwargs)
             logger.debug(f"PDF written to: {output_path}")
             return ConversionResult(
                 output_path=output_path,

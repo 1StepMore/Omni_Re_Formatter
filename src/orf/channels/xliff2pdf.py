@@ -53,43 +53,65 @@ class XLIFF2PDFConverter(BaseConverter):
                 ],
             )
 
-        skeleton_html = Path(opts.skeleton_html)
-        if not skeleton_html.exists():
-            return ConversionResult(
-                output_path=output_path,
-                success=False,
-                errors=[f"skeleton_html not found: {skeleton_html}"],
-            )
+        skeleton_content = opts.skeleton_html
 
-        from orf.channels.xliff2html import XLIFF2HTMLConverter
-        from orf.channels.html2pdf import HTML2PDFConverter
-
-        translated_html = output_path.with_suffix(".html")
-
-        html_converter = XLIFF2HTMLConverter()
-        html_result = html_converter.convert(skeleton_html, xliff_path, translated_html, options=options)
-        if not html_result.success:
-            return ConversionResult(
-                output_path=output_path,
-                success=False,
-                errors=[f"XLIFF->HTML failed: {html_result.errors}"],
-            )
-
-        pdf_converter = HTML2PDFConverter()
-        pdf_result = pdf_converter.convert(translated_html, output_path, options=options)
-        if not pdf_result.success:
-            return ConversionResult(
-                output_path=output_path,
-                success=False,
-                errors=[f"HTML->PDF failed: {pdf_result.errors}"],
-            )
-
-        return ConversionResult(
-            output_path=output_path,
-            success=True,
-            metadata={
-                "tool": "orf.xliff2pdf",
-                "skeleton_html": str(skeleton_html),
-                "translated_html": str(translated_html),
-            },
+        inline_html = (
+            skeleton_content.lstrip().startswith("<html")
+            or skeleton_content.lstrip().startswith("<!DOCTYPE")
+            or skeleton_content.lstrip().startswith("<!doctype")
         )
+
+        temp_skeleton = None
+        if inline_html:
+            import tempfile
+            import os
+            fd, temp_path = tempfile.mkstemp(suffix=".html", prefix="orf_skel_")
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(skeleton_content)
+            skeleton_html = Path(temp_path)
+            temp_skeleton = skeleton_html
+        else:
+            skeleton_html = Path(skeleton_content)
+            if not skeleton_html.exists():
+                return ConversionResult(
+                    output_path=output_path,
+                    success=False,
+                    errors=[f"skeleton_html not found: {skeleton_html}"],
+                )
+
+        try:
+            from orf.channels.xliff2html import XLIFF2HTMLConverter
+            from orf.channels.html2pdf import HTML2PDFConverter
+
+            translated_html = output_path.with_suffix(".html")
+
+            html_converter = XLIFF2HTMLConverter()
+            html_result = html_converter.convert(skeleton_html, xliff_path, translated_html, options=options)
+            if not html_result.success:
+                return ConversionResult(
+                    output_path=output_path,
+                    success=False,
+                    errors=[f"XLIFF->HTML failed: {html_result.errors}"],
+                )
+
+            pdf_converter = HTML2PDFConverter()
+            pdf_result = pdf_converter.convert(translated_html, output_path, options=options)
+            if not pdf_result.success:
+                return ConversionResult(
+                    output_path=output_path,
+                    success=False,
+                    errors=[f"HTML->PDF failed: {pdf_result.errors}"],
+                )
+
+            return ConversionResult(
+                output_path=output_path,
+                success=True,
+                metadata={
+                    "tool": "orf.xliff2pdf",
+                    "skeleton_html": str(skeleton_html),
+                    "translated_html": str(translated_html),
+                },
+            )
+        finally:
+            if temp_skeleton and temp_skeleton.exists():
+                temp_skeleton.unlink(missing_ok=True)

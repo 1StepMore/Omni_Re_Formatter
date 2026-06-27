@@ -711,7 +711,8 @@ def convert_batch(
 @click.option("--clear-cache", "clear_cache", is_flag=True, help="Remove all cached ORF outputs and exit")
 @click.option("--max-file-size-mb", type=float, default=None, help="拒绝超过此大小 (MB) 的文件")
 @click.option("--force", is_flag=True, default=False, help="Bypass skeleton format validation (may produce broken output). Use with caution.")
-def apply_xliff(input_file: str, xliff: str, xliff_content: Optional[str], output: str, format: str, output_json: bool, images_json: str, no_cache: bool, clear_cache: bool, max_file_size_mb: float | None = None, force: bool = False) -> None:
+@click.option("--skeleton-html", "skeleton_html_param", type=str, default=None, help="Path to skeleton HTML (required for PDF format)")
+def apply_xliff(input_file: str, xliff: str, xliff_content: Optional[str], output: str, format: str, output_json: bool, images_json: str, no_cache: bool, clear_cache: bool, max_file_size_mb: float | None = None, force: bool = False, skeleton_html_param: str | None = None) -> None:
     """Apply XLIFF translation to original document.
 
     INPUT_FILE: Original document (DOCX/PPTX/EPUB/HTML) or skeleton (XLIFF/ZIP).
@@ -783,7 +784,7 @@ def apply_xliff(input_file: str, xliff: str, xliff_content: Optional[str], outpu
     # fail early on a mismatched skeleton rather than letting
     # translate-toolkit crash with an abstract error.
     # Round 9: also accept .zip (OPP's skeleton.zip packaging).
-    _FORMAT_EXT = {"docx": ".docx", "pptx": ".pptx", "epub": ".epub", "html": ".html", "odt": ".odt"}
+    _FORMAT_EXT = {"docx": ".docx", "pptx": ".pptx", "epub": ".epub", "html": ".html", "odt": ".odt", "pdf": ".pdf"}
     _ZIP_FORMATS = {"docx", "pptx", "epub"}
     if format in _FORMAT_EXT:
         expected_ext = _FORMAT_EXT[format]
@@ -806,6 +807,11 @@ def apply_xliff(input_file: str, xliff: str, xliff_content: Optional[str], outpu
                     f"--format '{format}'. Continuing with --force flag — output may be broken."
                 )
 
+    from orf.converters.options import ConverterOptions
+    opts = ConverterOptions()
+    if skeleton_html_param:
+        opts.skeleton_html = skeleton_html_param
+
     converter: Any
     if format == "docx":
         from orf.channels.xliff2docx import XLIFF2DOCXConverter
@@ -827,14 +833,18 @@ def apply_xliff(input_file: str, xliff: str, xliff_content: Optional[str], outpu
         from orf.channels.xliff2odf import XLIFF2ODFConverter
 
         converter = XLIFF2ODFConverter()
+    elif format == "pdf":
+        from orf.channels.xliff2pdf import XLIFF2PDFConverter
+
+        converter = XLIFF2PDFConverter()
     else:
         raise click.ClickException(
             f"Unsupported format '{format}'\n"
-            f"Hint: Valid formats are: docx, pptx, epub, html, odt\n"
+            f"Hint: Valid formats are: docx, pptx, epub, html, odt, pdf\n"
             f"       Use --format <format> to specify"
         )
 
-    result = converter.convert(input_path, xliff_path, output_path)
+    result = converter.convert(input_path, xliff_path, output_path, options=opts)
 
     if result.success and images:
         import tempfile

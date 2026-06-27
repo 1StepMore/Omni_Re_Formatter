@@ -40,3 +40,45 @@ def test_xliff2pdf_validate_input(tmp_path: Path):
     pdf = tmp_path / "t.pdf"
     pdf.write_bytes(b"%PDF-1.4")
     assert c.validate_input(pdf)
+
+
+def test_xliff2pdf_inline_skeleton_html(tmp_path):
+    """ORF#21: XLIFF2PDFConverter accepts inline HTML content (starts with '<html' or '<!DOCTYPE')."""
+    from orf.channels.xliff2pdf import XLIFF2PDFConverter
+    from orf.converters.options import ConverterOptions
+
+    pdf = tmp_path / "in.pdf"
+    pdf.write_bytes(b"%PDF-1.4\n")
+    xlf = tmp_path / "in.xlf"
+    xlf.write_text("<xliff/>")
+    output = tmp_path / "out.pdf"
+
+    c = XLIFF2PDFConverter()
+    # Inline HTML with <!DOCTYPE prefix
+    opts = ConverterOptions(
+        skeleton_html="<!DOCTYPE html><html><head><meta charset='UTF-8'></head><body><div data-trans-unit-id='u1'>Hello</div></body></html>"
+    )
+    result = c.convert(pdf, xlf, output, options=opts)
+    # Should NOT fail with "skeleton_html not found"
+    error_msgs = [str(e) for e in (result.errors or [])]
+    assert not any("not found" in m for m in error_msgs), f"Got: {error_msgs}"
+
+
+def test_xliff2pdf_file_skeleton_still_works(tmp_path):
+    """ORF#21: file path skeleton_html still works (backward compat)."""
+    from orf.channels.xliff2pdf import XLIFF2PDFConverter
+    from orf.converters.options import ConverterOptions
+
+    pdf = tmp_path / "in.pdf"
+    pdf.write_bytes(b"%PDF-1.4\n")
+    xlf = tmp_path / "in.xlf"
+    xlf.write_text("<xliff/>")
+    html_file = tmp_path / "skel.html"
+    html_file.write_text("<html><body><div data-trans-unit-id='u1'>Hello</div></body></html>")
+    output = tmp_path / "out.pdf"
+
+    c = XLIFF2PDFConverter()
+    opts = ConverterOptions(skeleton_html=str(html_file))
+    result = c.convert(pdf, xlf, output, options=opts)
+    error_msgs = [str(e) for e in (result.errors or [])]
+    assert not any("not found" in m for m in error_msgs), f"Got: {error_msgs}"
