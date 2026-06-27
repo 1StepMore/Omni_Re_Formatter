@@ -139,6 +139,7 @@ or [agent-pipeline-guide.md](https://github.com/1StepMore/e2e-test-suite/blob/ma
 | `MCP_SHARED_SECRET` | (none — auth disabled) | Shared-secret auth for MCP requests. |
 | `OMNI_TEST_FAKE_LLM=1` | unset | Mock LLM responses (only affects tests). |
 | `OMNI_TEST_FAKE_PANDOC=1` | unset | Bypass pandoc subprocess (use `markdown` lib instead). |
+| `ORF_AUTOLOAD_DOTENV` | unset | Set to `1` to auto-load `.env` file (same as `--load-dotenv` CLI flag). |
 
 ## Path Configuration (MCP Server)
 

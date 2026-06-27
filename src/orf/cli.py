@@ -205,8 +205,11 @@ def _sanitize_for_json(obj: Any) -> Any:
     envvar="OMNI_LOG_FORMAT",
     help="日志输出格式: 'console' (默认) 或 'json'。也可通过 OMNI_LOG_FORMAT 环境变量设置。",
 )
-def main(verbose: bool, log_format: str | None = None) -> None:
+@click.option("--load-dotenv", is_flag=True, default=False, help="Load .env file before running (opt-in)")
+def main(verbose: bool, log_format: str | None = None, load_dotenv: bool = False) -> None:
     """ORF - Omni-Re-Formatter: 将本地化后的 MD/XLIFF 还原为目标复杂格式。"""
+    if load_dotenv or os.environ.get("ORF_AUTOLOAD_DOTENV") == "1":
+        _load_env_for_orf()
     log_level = "DEBUG" if verbose else "INFO"
     if log_format:
         os.environ["OMNI_LOG_FORMAT"] = log_format
@@ -237,6 +240,53 @@ def _maybe_install_fake_pandoc() -> None:
             return _fake_runner(*args, **kwargs)
         return _original_run(*args, **kwargs)
     _subprocess.run = _patched_run
+
+
+def _load_dotenv_for_orf(env_path: Path) -> None:
+    """Parse and export .env file without blocking on missing keys."""
+    try:
+        content = env_path.read_text()
+        for line in content.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            key = key.strip()
+            value = value.strip().strip('"').strip("'")
+            if key and value:
+                os.environ.setdefault(key, value)
+    except Exception as exc:
+        logger.warning("Failed to load .env file %s: %s", env_path, exc)
+
+
+def _load_env_for_orf() -> None:
+    """Load .env file for CLI commands.
+
+    Search order:
+      1. $ORF_DOTENV env var (explicit override)
+      2. ./.env (current working directory)
+      3. Walk up parent directories looking for .env
+      4. ~/.config/orf/.env (user-level fallback)
+
+    If no .env is found, the function returns silently.
+    """
+    from pathlib import Path as _Path
+
+    search_paths: list[_Path] = []
+    explicit = os.environ.get("ORF_DOTENV")
+    if explicit:
+        search_paths.append(_Path(explicit))
+    search_paths.append(_Path.cwd() / ".env")
+    for parent in _Path.cwd().resolve().parents:
+        candidate = parent / ".env"
+        if candidate not in search_paths:
+            search_paths.append(candidate)
+    search_paths.append(_Path.home() / ".config" / "orf" / ".env")
+
+    for env_path in search_paths:
+        if env_path.exists() and env_path.is_file():
+            _load_dotenv_for_orf(env_path)
+            return
 
 
 @main.command("apply-md")
