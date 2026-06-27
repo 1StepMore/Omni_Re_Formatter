@@ -5,6 +5,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 from pathlib import Path
+from logging import Logger
 from typing import Optional
 
 from orf.converters.base import BaseConverter, ConversionResult
@@ -14,6 +15,23 @@ from orf.logging import get_logger
 from orf.converters.options import ConverterOptions
 
 logger = get_logger("channel.md2pptx")
+
+_TIP_MD2PPTX_FALLBACK = (
+    "💡 Tip: For higher-quality PPTX output, install md2pptx:\n"
+    "   dotnet tool install --global md2pptx\n"
+    "   (or download a release binary from "
+    "https://github.com/MartinPacker/md2pptx/releases)\n"
+    "   Otherwise, ORF will use the pandoc fallback which produces "
+    "lower-quality output."
+)
+_tip_shown = False
+
+
+def _show_md2pptx_tip_once(logger_inst: Logger) -> None:
+    global _tip_shown
+    if not _tip_shown:
+        logger_inst.info(_TIP_MD2PPTX_FALLBACK)
+        _tip_shown = True
 
 
 def _md2pptx_install_hint() -> str:
@@ -55,8 +73,10 @@ class MD2PPTXConverter(BaseConverter):
         self, input_path: Path, output_path: Path
     ) -> ConversionResult:
         """Fallback: convert MD to PPTX via pandoc when md2pptx is unavailable."""
+        _show_md2pptx_tip_once(logger)
         warning_msg = (
-            "md2pptx not found, using pandoc fallback — quality may differ"
+            "md2pptx not found, using pandoc fallback — quality may differ. "
+            "Install md2pptx for higher-quality output (tip shown above)."
         )
         logger.warning(warning_msg)
         cmd = ["pandoc", str(input_path), "-o", str(output_path)]

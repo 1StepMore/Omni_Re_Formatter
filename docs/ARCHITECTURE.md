@@ -1,3 +1,6 @@
+> **Note:** This file covers ORF internals only. For cross-module pipeline architecture
+> (OPP → OL → ORF), see the [suite-level ARCHITECTURE.md](../../docs/ARCHITECTURE.md).
+
 # ORF Architecture
 
 This document explains the internals of Omni-Re-Formatter (ORF): its module
