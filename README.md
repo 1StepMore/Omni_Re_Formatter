@@ -98,6 +98,7 @@ orf-mcp-server
 # - batch_convert  批量转换 MD 文件
 # - detect_format  自动检测文档格式
 # - info           获取文档信息
+# - ping           健康检查（返回版本号）
 ```
 
 所有 MCP 工具均使用 **Pydantic 类型模型** 进行输入输出验证，防止因 schema 不匹配导致的调用失败（实测可将此类错误从 38% 降至 0%）。
@@ -117,7 +118,7 @@ ORF v0.3.0 重构为 **Agent-Oriented** 架构，专为 AI Agent 集成设计，
 
 ### MCP Server — 为 AI Agent 而生
 
-ORF 的 MCP Server 基于 **FastMCP** 构建，对外提供 5 个工具，AI Agent（Claude、Cursor、OpenCode 等）可通过标准 MCP 协议直接调用 ORF 的文档转换能力。
+ORF 的 MCP Server 基于 **FastMCP** 构建，对外提供 6 个工具，AI Agent（Claude、Cursor、OpenCode 等）可通过标准 MCP 协议直接调用 ORF 的文档转换能力。
 
 ```
 AI Agent (Claude/Cursor) 
@@ -233,7 +234,7 @@ src/orf/
 ├── cloud/            # S3, Azure Blob 客户端
 ├── ai/               # 布局分析与溢出修正
 ├── mcp/              # MCP Server (Agent 集成层)
-│   ├── server.py     # FastMCP 服务，5 个工具
+│   ├── server.py     # FastMCP 服务，6 个工具
 │   ├── schemas.py    # Pydantic 类型模型
 │   ├── security.py   # PathValidator 路径安全
 │   └── config.py     # MCP 配置
@@ -254,7 +255,7 @@ src/orf/
 
 - **Agent-Oriented 架构**：MCP Server + Foreman/Specialist + HITL 审批
 - **图片精确定位注入**：支持 DOCX/PPTX/HTML/EPUB 图片按位置回填
-- **MCP 工具**：5 个类型安全的 Agent 工具（Pydantic 模型验证）
+- **MCP 工具**：6 个类型安全的 Agent 工具（Pydantic 模型验证）
 - **路径安全**：PathValidator 防止目录遍历
 - **审计日志**：correlation_id + agent_id 全链路追踪
 - 400+ 个测试用例（含 MCP 集成测试 + 端到端管线测试）

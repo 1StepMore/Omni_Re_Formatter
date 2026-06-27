@@ -107,7 +107,7 @@ or [agent-pipeline-guide.md](https://github.com/1StepMore/e2e-test-suite/blob/ma
 | HTML | `markdown` lib (pure Python) | No pandoc needed. |
 | RTF | pandoc | Same. |
 | PDF | `weasyprint` (`[weasyprint]` extra) | Falls back to pandoc if available. |
-| PPTX | **`md2pptx` CLI** (E2E-79) | .NET tool, NOT a pip package. Requires `dotnet tool install --global md2pptx` OR a release binary on PATH. ORF errors with an actionable install hint if missing. |
+| PPTX | **`md2pptx` CLI** (E2E-79) | .NET tool, NOT a pip package. Requires `dotnet tool install --global md2pptx` OR a release binary on PATH. ORF falls back to pandoc automatically if md2pptx is missing and pandoc is available; errors with an actionable install hint only when both are missing. |
 | ICML | pandoc | Same. |
 | SRT | `srt` lib | Subtitle format. |
 | CSV | pandas | Pure Python. |
@@ -122,28 +122,31 @@ or [agent-pipeline-guide.md](https://github.com/1StepMore/e2e-test-suite/blob/ma
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `ORF_ALLOWED_DIRECTORIES` | (none) | Allowlist of directories the MCP can read (E2E-76-era naming). |
-| `ORF_MAX_FILE_SIZE_MB` | 100 | Max input file size in MB. |
-| `ORF_REQUEST_TIMEOUT` | 60 | Per-tool request timeout (seconds). |
-| `ORF_BATCH_SIZE` | 10 | Batch size for `batch_convert`. |
-| `ORF_PANDOC_TIMEOUT` | 120 | pandoc subprocess timeout (seconds). |
-| `ORF_METRICS_DIR` | `/tmp/orf-metrics` | Prometheus metrics output. |
-| `ORF_HEALTH_HOST` / `ORF_HEALTH_PORT` | `127.0.0.1` / `8765` | Health-check endpoint bind. |
-| `ORF_HEALTH_ENABLED` | `false` | Toggle health-check endpoint. |
-| `ORF_RATE_LIMIT_RPM` | `60` | Per-MCP-tool token-bucket rate limit. |
-| `ORF_RATE_LIMIT_BURST` | `10` | Token-bucket burst size. |
-| `ORF_TRACING_ENABLED` | `false` | OTel tracing toggle. |
-| `ORF_TRACES_DIR` | `/tmp/orf-traces` | OTel trace output. |
+| `ORF_MCP_ALLOWED_DIRS` | (none) | Colon/semicolon-separated allowlist of directories the MCP can read. **Required** for tool calls to succeed. |
+| `ORF_MCP_MAX_FILE_SIZE` | `104857600` (100 MB) | Max input file size in bytes. |
+| `ORF_MCP_TIMEOUT` | `30` | Per-tool request timeout (seconds). |
+| `OMNI_METRICS_DIR` | `/tmp/omni-metrics` | Prometheus metrics directory. |
+| `OMNI_HEALTH_HOST` | `127.0.0.1` | Health-check endpoint bind host. |
+| `OMNI_HEALTH_PORT` | `8766` | Health-check endpoint bind port. |
+| `OMNI_HEALTH_ENABLED` | `false` | Set to `1`/`true`/`yes`/`on` to enable the health HTTP endpoint. |
+| `OMNI_RATE_LIMIT_RPM` | `60` | Per-MCP-tool token-bucket rate limit (0 = disabled). |
+| `OMNI_RATE_LIMIT_BURST` | `10` | Token-bucket burst size. |
+| `OMNI_TRACING_ENABLED` | `false` | Set to `1`/`true`/`yes`/`on` to enable OTel tracing. |
+| `OMNI_TRACES_DIR` | `/tmp/omni-traces` | OTel trace output directory. |
+| `ORF_LOG_LEVEL` | `INFO` | Log level: `DEBUG`, `INFO`, `WARNING`, `ERROR`. |
+| `OMNI_CACHE_DIR` | `~/.omni_cache` | Cache root directory for transient artifacts. |
+| `OMNI_LOG_FORMAT` | `console` | Log format: `console` or `json`. |
+| `MCP_SHARED_SECRET` | (none — auth disabled) | Shared-secret auth for MCP requests. |
 | `OMNI_TEST_FAKE_LLM=1` | unset | Mock LLM responses (only affects tests). |
 | `OMNI_TEST_FAKE_PANDOC=1` | unset | Bypass pandoc subprocess (use `markdown` lib instead). |
 
 ## Path Configuration (MCP Server)
 
-The ORF MCP server uses `ORF_ALLOWED_DIRECTORIES` to restrict file 
+The ORF MCP server uses `ORF_MCP_ALLOWED_DIRS` to restrict file 
 system access during format conversion.
 
 ```bash
-export ORF_ALLOWED_DIRECTORIES="/path/to/docs:/path/to/output"
+export ORF_MCP_ALLOWED_DIRS="/path/to/docs:/path/to/output"
 ```
 
 **Fallback behavior:** If unset, ORF defaults to `[Path.cwd()]` 

@@ -41,15 +41,37 @@ ln -s "$(python -c 'import pypandoc; print(pypandoc.get_pandoc_path())')" /usr/l
 `ModuleNotFoundError: No module named 'weasyprint'`.
 
 **Cause.** WeasyPrint is an optional dependency. ORF uses it as the default PDF
-engine (changed from `pdflatex` to WeasyPrint in v0.4.1).
+engine (changed from `pdflatex` to WeasyPrint in v0.4.1). WeasyPrint requires
+system-level C libraries for rendering.
 
 **Fix.**
 
 ```bash
+# 1. Install system dependencies (required by WeasyPrint)
+# Debian / Ubuntu:
+sudo apt-get install -y libpango-1.0-0 libpangoft2-1.0-0 libpangocairo-1.0-0 \
+  libcairo2 libcairo-gobject2 libgdk-pixbuf2.0-0 shared-mime-info
+
+# macOS (Homebrew):
+brew install pango cairo gdk-pixbuf
+
+# 2. Then install the Python package
 pip install 'omni-re-formatter[weasyprint]'
 
-# Verify
+# 3. Verify
 orf apply-md manual.md --target-format pdf --output manual.pdf
+```
+
+If you are using a `python:3.13-slim` Docker image, the system debs above
+must be installed in your Dockerfile before WeasyPrint. Example:
+
+```dockerfile
+FROM python:3.13-slim
+RUN apt-get update && apt-get install -y \
+    libpango-1.0-0 libpangoft2-1.0-0 libpangocairo-1.0-0 \
+    libcairo2 libcairo-gobject2 libgdk-pixbuf2.0-0 shared-mime-info \
+    && rm -rf /var/lib/apt/lists/*
+RUN pip install 'omni-re-formatter[weasyprint]'
 ```
 
 If WeasyPrint is not an option in your environment, install a real LaTeX
