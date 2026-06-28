@@ -56,6 +56,11 @@ class MD2HTMLConverter(BaseConverter):
         try:
             md_content = input_path.read_text(encoding="utf-8")
 
+            # Strip YAML frontmatter before markdown conversion
+            # (the --- delimiters are interpreted as <hr> by the markdown lib)
+            from orf.parsers.frontmatter import strip_frontmatter
+            md_content = strip_frontmatter(md_content)
+
             extensions = ["extra", "codehilite", "toc", "tables", "fenced_code"]
             md = markdown.Markdown(extensions=extensions)
             body_html = md.convert(md_content)

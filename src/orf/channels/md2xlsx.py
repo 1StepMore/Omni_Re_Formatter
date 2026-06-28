@@ -38,6 +38,10 @@ class MD2XLSXConverter(BaseConverter):
     def _parse_table_rows(self, content: str) -> list[list[str]]:
         """Parse markdown table rows from content.
 
+        Handles both GFM-style tables (with outer | pipes) and
+        simplified tables where outer pipes are optional. Also
+        tolerates leading/trailing whitespace.
+
         Args:
             content: Markdown content
 
@@ -49,9 +53,15 @@ class MD2XLSXConverter(BaseConverter):
 
         for line in lines:
             line = line.strip()
-            # Table row must start and end with |
-            if not (line.startswith("|") and line.endswith("|")):
+            # Table row must contain at least one | and at least 2 cells
+            if "|" not in line or line.count("|") < 2:
                 continue
+
+            # Normalize: add leading/trailing | if missing
+            if not line.startswith("|"):
+                line = "|" + line
+            if not line.endswith("|"):
+                line = line + "|"
 
             # Skip separator lines like |---|---|
             if re.match(r"^\|[\s\-:|]+\|$", line):
