@@ -142,18 +142,18 @@ or [agent-pipeline-guide.md](https://github.com/1StepMore/e2e-test-suite/blob/ma
 
 ## Path Configuration (MCP Server)
 
-The ORF MCP server uses `ORF_MCP_ALLOWED_DIRS` to restrict file 
+The ORF MCP server uses `ORF_MCP_ALLOWED_DIRS` to restrict file
 system access during format conversion.
 
 ```bash
 export ORF_MCP_ALLOWED_DIRS="/path/to/docs:/path/to/output"
 ```
 
-**Fallback behavior:** If unset, ORF defaults to `[Path.cwd()]` 
-(the current working directory). For production use, always set 
+**Fallback behavior:** If unset, ORF defaults to `[Path.cwd()]`
+(the current working directory). For production use, always set
 this explicitly to avoid unintended directory access.
 
-**Note:** The env var name differs from OPP (`OPP_MCP_ALLOWED_DIRS`). 
+**Note:** The env var name differs from OPP (`OPP_MCP_ALLOWED_DIRS`).
 See [agent-pipeline-guide.md](https://github.com/1StepMore/e2e-test-suite/blob/main/docs/agent-pipeline-guide.md) for a cross-server comparison.
 
 ## PathValidator security model
