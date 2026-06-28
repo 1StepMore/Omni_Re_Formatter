@@ -1,5 +1,19 @@
 # Changelog
 
+## v0.4.16 (2026-06-28)
+
+### 🛠️ 修复 / Fixed
+
+- **(AGENTS.md, README.md, docs/TROUBLESHOOTING.md)**: rewrite env var table (12 wrong ORG_* → ORG_MCP_*/OMNI_*); fix tool count 5→6 (add ping); document WeasyPrint system C-lib deps (libpango/libcairo/libgdk-pixbuf) for Debian/Ubuntu/macOS/python:3.13-slim
+
+### 📝 文档 / Docs
+
+- **(ARCHITECTURE.md, src/orf/channels/md2pptx.py, README.md)**: add cross-reference to suite-level ARCHITECTURE.md; document md2pptx pandoc fallback in AGENTS.md; translate Chinese README to English
+
+### ✨ 新功能 / Added
+
+- **(src/orf/cli.py, .env.example, AGENTS.md)**: add opt-in .env auto-loading via `--load-dotenv` flag and `ORF_AUTOLOAD_DOTENV=1` env var. Mirrors OPP/OL pattern (no python-dotenv dependency)
+
 ## v0.4.8 (2026-06-25)
 
 ### 🛠️ 修复 / Fixed
