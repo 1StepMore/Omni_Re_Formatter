@@ -57,6 +57,14 @@ def apply_xliff_to_json(
             "target": target,
         })
         translations[unit_id] = target
+        # Build path→value map for reconstruction from json_field: targets
+        if target.startswith("json_field:"):
+            rest = target[len("json_field:"):]
+            if " = " in rest:
+                eq_idx = rest.index(" = ")
+                path = rest[:eq_idx]
+                val = rest[eq_idx + 3:]
+                translations[path] = val
 
     output: dict[str, Any] = {"xliff_units": units, "unit_count": len(units)}
 
