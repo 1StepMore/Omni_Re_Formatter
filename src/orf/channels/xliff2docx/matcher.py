@@ -79,14 +79,17 @@ def collect_all_paragraphs(root: etree._Element) -> list[etree._Element]:
         for p in tc.iter(f"{w_tag}p"):
             paragraphs.append(p)
 
-    # 3. Textbox paragraphs — deduplicated by text content
+    # 3. Textbox paragraphs — preserve ALL entries for correct non_body_N
+    # index matching.  OPP extracts every textbox paragraph at a distinct
+    # non_body_N position; dedup by text (previous behaviour) broke the
+    # positional contract, causing 9 units to fall past the end of the
+    # paragraph list.  ORF#37.
     for txbx in root.iter(f"{w_tag}txbxContent"):
         for p in txbx.iter(f"{w_tag}p"):
             text = "".join(
                 t.text or "" for t in p.iter(f"{w_tag}t")
             ).strip()
-            if text and text not in seen_texts:
-                seen_texts.add(text)
+            if text:
                 paragraphs.append(p)
 
     return paragraphs
