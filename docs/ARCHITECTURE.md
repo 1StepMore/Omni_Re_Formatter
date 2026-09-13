@@ -50,7 +50,7 @@ src/orf/
 │   └── inline_formatting.py
 ├── cloud/                       # S3 / Azure Blob clients
 ├── ai/                          # Layout overflow detection & correction
-├── mcp/                         # Agent-facing MCP server (6 tools)
+├── mcp/                         # Agent-facing MCP server (7 tools)
 │   ├── server.py                # Standard mcp library server (mcp 1.27.2)
 │   ├── schemas.py               # Pydantic models (ImagePlacement, ...)
 │   ├── security.py              # PathValidator

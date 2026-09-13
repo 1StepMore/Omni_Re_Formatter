@@ -155,7 +155,7 @@ ORF v0.3.0 was refactored into an **Agent-Oriented** architecture, designed spec
 
 ### MCP Server — Built for AI Agents
 
-ORF's MCP Server is built on **FastMCP**, exposing 6 tools that AI Agents (Claude, Cursor, OpenCode, etc.) can call directly via the standard MCP protocol to leverage ORF's document conversion capabilities.
+ORF's MCP Server is built on the standard `mcp` server library (the earlier third-party MCP dependency was removed), exposing 7 tools that AI Agents (Claude, Cursor, OpenCode, etc.) can call directly via the standard MCP protocol to leverage ORF's document conversion capabilities.
 
 ```
 AI Agent (Claude/Cursor) 
@@ -273,7 +273,7 @@ src/orf/
 ├── cloud/            # S3, Azure Blob clients
 ├── ai/               # Layout analysis and overflow correction
 ├── mcp/              # MCP Server (Agent integration layer)
-│   ├── server.py     # FastMCP service, 6 tools
+│   ├── server.py     # Standard mcp library server, 7 tools
 │   ├── schemas.py    # Pydantic type models
 │   ├── security.py   # PathValidator path security
 │   └── config.py     # MCP configuration

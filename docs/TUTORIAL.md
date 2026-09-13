@@ -26,7 +26,7 @@ pip install omni-re-formatter
 
 # 3. Confirm the install
 orf --version
-# omni-re-formatter, version 0.4.3
+# omni-re-formatter, version 0.4.17
 
 # 4. Create a tiny markdown file
 cat > hello.md <<'EOF'
@@ -331,7 +331,7 @@ In the agent's chat, ask:
 Expected response:
 
 ```json
-{ "success": true, "module": "orf", "version": "0.4.3" }
+{ "success": true, "module": "orf", "version": "0.4.17" }
 ```
 
 ### 4.5 End-to-end agent run
