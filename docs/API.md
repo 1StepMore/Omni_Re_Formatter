@@ -23,7 +23,7 @@ The `orf` command is a Click group. Every subcommand accepts the global `--verbo
 flag and a global `--version` flag (added in v0.4.3 packaging fix; `src/orf/cli.py:198`).
 
 ```bash
-orf --version          # omni-re-formatter, version 0.4.3
+orf --version          # omni-re-formatter, version 0.4.17
 orf --help             # list subcommands
 orf <subcommand> --help
 ```
@@ -308,7 +308,7 @@ Schema source: `src/orf/mcp/server.py:692`.
 
 #### 2.2.6 `ping`
 
-Health check. Returns: `{"success": true, "module": "orf", "version": "0.4.3"}`.
+Health check. Returns: `{"success": true, "module": "orf", "version": "0.4.17"}`.
 Schema source: `src/orf/mcp/server.py:706`.
 
 ### 2.3 Error codes
