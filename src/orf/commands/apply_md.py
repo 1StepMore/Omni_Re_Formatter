@@ -177,7 +177,6 @@ def apply_md(
     if reference_doc_content is not None:
         import base64
         import tempfile
-        from orf.cli import _scrub_dotenv_for_subprocess  # not strictly needed
         try:
             content_str = reference_doc_content
             if content_str.startswith("@"):
