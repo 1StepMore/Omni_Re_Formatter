@@ -139,6 +139,7 @@ def convert_batch(
             click.echo(
                 json.dumps(
                     {
+                        "success": True,
                         "status": "empty",
                         "succeeded": 0,
                         "failed": 0,
@@ -304,6 +305,7 @@ def convert_batch(
         click.echo(
             json.dumps(
                 {
+                    "success": fail_count == 0 or (allow_partial and status == "partial"),
                     "status": status,
                     "succeeded": success_count,
                     "failed": fail_count,
