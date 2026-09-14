@@ -115,7 +115,10 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v3
         with:
-          version: "latest"
+          version: "0.11.8"
+
+      - name: Verify uv.lock is up to date (fail-loud guard)
+        run: uv --no-config lock --check
 
       - name: Install system deps (pandoc + weasyprint C libs for real conversions)
         run: |
@@ -131,7 +134,7 @@ jobs:
 
       - name: uv sync (root workspace)
         working-directory: suite
-        run: uv sync --frozen
+        run: uv sync --locked
 
       - name: Create .venv_ol symlink for legacy paths
         working-directory: suite
