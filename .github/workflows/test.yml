@@ -103,7 +103,7 @@ jobs:
       - name: Clone Omni Suite (engine + scenarios + fixtures)
         uses: actions/checkout@v4
         with:
-          repository: 1StepMore/e2e-test-suite
+          repository: renanzai40/OmniSuite_BackUp
           path: suite
           ref: main
 
