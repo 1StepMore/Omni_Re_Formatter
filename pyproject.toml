@@ -27,7 +27,7 @@ dependencies = [
     "tqdm>=4.66.0",
     "pypandoc-binary>=1.17",
     "markdown>=3.5",
-    "mcp>=1.0.0",
+    "mcp>=1.0.0,<2",
     "pydantic>=2.0.0",
     "anyio>=4.0.0",
     "prometheus_client>=0.20.0",
@@ -59,7 +59,7 @@ ai = ["openai>=1.12.0"]
 office = ["openpyxl>=3.0.0"]
 notebook = ["nbformat>=5.0.0"]
 email-output = ["aspose-email-foss>=24.0.0"]
-mcp = ["mcp>=1.0.0"]
+mcp = ["mcp>=1.0.0,<2"]
 
 [project.scripts]
 orf = "orf.cli:main"
