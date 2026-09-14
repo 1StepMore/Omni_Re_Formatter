@@ -24,7 +24,7 @@ jobs:
           python-version: "3.13"
 
       - name: Install ruff
-        run: pip install ruff
+        run: pip install "ruff==0.15.14"   # pinned to the version in uv.lock — ruff's default rule set changes across releases
 
       - name: Lint with ruff
         run: ruff check src/orf/
