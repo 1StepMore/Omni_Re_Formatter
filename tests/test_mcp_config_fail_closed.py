@@ -6,7 +6,6 @@ ValueError instead of silently falling back to Path.cwd() (fail-OPEN).
 
 import os
 import pytest
-from pathlib import Path
 
 
 class TestFailClosedAllowedDirs:
@@ -49,14 +48,20 @@ class TestFailClosedAllowedDirs:
         assert tmp_path in cfg.allowed_directories
 
     def test_works_with_multiple_dirs(self, tmp_path):
-        """load_config parses colon-separated directories."""
+        """load_config parses platform-separator-separated directories.
+
+        2026-09-17: 分隔符改用 ``os.pathsep``（POSIX ``":"`` / Windows ``";"``）。
+        旧断言把 ``":"`` 写死 —— 在 Windows 上 ``":"`` 是盘符的一部分，写死的
+        分隔符正是 allowlist 失效的原因（见 ADR 0007）。POSIX 上 ``os.pathsep``
+        就是 ``":"``，字符串与旧断言逐字相同。
+        """
         from orf.mcp.config import load_config
 
         d1 = tmp_path / "a"
         d2 = tmp_path / "b"
         d1.mkdir()
         d2.mkdir()
-        os.environ["ORF_MCP_ALLOWED_DIRS"] = f"{d1}:{d2}"
+        os.environ["ORF_MCP_ALLOWED_DIRS"] = os.pathsep.join([str(d1), str(d2)])
         cfg = load_config()
         assert d1 in cfg.allowed_directories
         assert d2 in cfg.allowed_directories

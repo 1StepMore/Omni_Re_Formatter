@@ -4,12 +4,12 @@ These tests target attack vectors documented in AUDIT_FINDINGS_VERIFIED.md
 specific to the Omni-Re-Formatter MCP surface.
 """
 
-import base64
 import json
 import os
 import sys
+import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -21,8 +21,13 @@ if str(_ORF_SRC) not in sys.path:
 
 # Round 13: set ORF_MCP_ALLOWED_DIRS so the MCP PathValidator singleton
 # (created on first import of orf.mcp.server) allows tmp_path fixtures.
+# 2026-09-17 (ADR 0007): use ``os.pathsep`` + the real temp dir instead of the
+# POSIX literal "/tmp" separator — on Windows the old form became a single
+# bogus path. POSIX produces the identical string.
 if "ORF_MCP_ALLOWED_DIRS" not in os.environ:
-    os.environ["ORF_MCP_ALLOWED_DIRS"] = f"{_REPO_ROOT}:/tmp"
+    os.environ["ORF_MCP_ALLOWED_DIRS"] = os.pathsep.join(
+        [str(_REPO_ROOT), tempfile.gettempdir()]
+    )
 
 
 # 1x1 transparent PNG, base64.
@@ -147,13 +152,12 @@ class TestC4RejectsImageFilePathArbitraryRead:
                 args, _ = call
                 if args and isinstance(args[0], list):
                     cmd_str = " ".join(str(a) for a in args[0])
-                    # /etc/passwd content would have "root:" — if the file
-                    # was read, that text would be base64-encoded into args.
-                    # We just verify the input file_path isn't passed verbatim
-                    # to --images-json. The temp file would not contain
-                    # the raw path; if --images-json is in args, the path
-                    # points to a tempfile.
-                    pass
+                    # 2026-09-17: 这里原先是「取到 cmd_str 后什么都不做」的空循环
+                    # （只有注释 + pass），F841 就此长期存在。补上注释所声称的那条
+                    # 断言：被拒/被清洗时，原始遍历路径不得逐字传给 CLI。
+                    assert "/etc/passwd" not in cmd_str, (
+                        f"C4 BUG: raw traversal path passed to CLI: {cmd_str}"
+                    )
 
     def test_apply_xliff_accepts_data_base64_only(self, tmp_path):
         """C4: valid data_base64 images must still work."""

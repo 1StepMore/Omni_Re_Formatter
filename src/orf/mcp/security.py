@@ -10,6 +10,8 @@ SYSTEM_DIRS: set = {
     '/etc',
     '/usr',
     '/var',
+    '/proc',
+    '/sys',
     '/System',
     '/Library',
     r'/C:/Windows',
@@ -26,6 +28,39 @@ BLOCKED_EXTENSIONS: set = {
     '.vbs',
     '.js',
 }
+
+
+#: Environment variable that replaces the default extension whitelist
+#: (comma-separated, leading dots optional).
+_EXTENSIONS_ENV_VAR = 'MCP_ALLOWED_EXTENSIONS'
+
+
+def resolve_allowed_extensions(default: set) -> set:
+    """解析 ``MCP_ALLOWED_EXTENSIONS`` 覆盖，未设置或为空时返回 *default*。
+
+    修复（2026-09-17，ADR 0007）：原先只有 ``__init__`` 读环境变量，legacy
+    ``validate()`` 直接读类常量 ``ALLOWED_EXTENSIONS``，于是
+    ``MCP_ALLOWED_EXTENSIONS`` 在 legacy 路径上静默失效 —— 同一个进程里两条入口
+    对同一个文件给出不同答案。抽成单一解析入口后两条路径共用同一份逻辑。
+
+    同时把「纯空白」视同未设置（与 OL 的 ``get_allowed_extensions()`` 语义一致）：
+    旧实现用 ``if custom_exts:`` 判断，``MCP_ALLOWED_EXTENSIONS=" "`` 会产生空集，
+    把全部路径判为非法。
+
+    Args:
+        default: 环境变量缺省或为空白时使用的默认白名单。
+
+    Returns:
+        生效的扩展名集合，每项都带前导点。
+    """
+    raw = os.environ.get(_EXTENSIONS_ENV_VAR, '').strip()
+    if not raw:
+        return default
+    return {
+        ext if ext.startswith('.') else f'.{ext}'
+        for ext in (part.strip() for part in raw.split(','))
+        if ext
+    }
 
 
 @dataclass
@@ -78,13 +113,9 @@ class PathValidator:
         self.max_file_size_bytes = max_file_size_bytes
 
         # P2-T4: MCP_ALLOWED_EXTENSIONS env var overrides the default set
-        custom_exts = os.environ.get("MCP_ALLOWED_EXTENSIONS")
-        if custom_exts:
-            self.ALLOWED_EXTENSIONS = {
-                ext.strip() if ext.strip().startswith(".") else f".{ext.strip()}"
-                for ext in custom_exts.split(",")
-                if ext.strip()
-            }
+        # (2026-09-17, ADR 0007: routed through the shared resolver so the
+        # legacy validate() below cannot disagree with validate_path()).
+        self.ALLOWED_EXTENSIONS = resolve_allowed_extensions(PathValidator.ALLOWED_EXTENSIONS)
 
     def validate_path(self, path: str, allow_missing: bool = False) -> ValidationResult:
         """Validate a file path against security rules.
@@ -251,7 +282,9 @@ class PathValidator:
         if '..' in path.parts:
             return False, "Path traversal not allowed"
 
-        if path.suffix.lower() not in PathValidator.ALLOWED_EXTENSIONS:
+        if path.suffix.lower() not in resolve_allowed_extensions(
+            PathValidator.ALLOWED_EXTENSIONS
+        ):
             return False, f"Extension '{path.suffix}' not in allowed set"
 
         if base_dir:

@@ -53,24 +53,32 @@ class MCPConfig:
 
 
 def _parse_allowed_dirs(value: str) -> List[Path]:
-    """Parse colon/semicolon separated paths into a list of Path objects.
+    """Parse platform-separator/comma separated paths into a list of Path objects.
 
     2026-06-17 round 12 (FIX-#5): handle single-path values without
     separator. Previously `/tmp` returned [] (no separator matched),
     which caused the MCP server to fall back to Path.cwd() as the
     allowlist, rejecting tmp_path fixtures in tests.
+
+    2026-09-17 修复（ADR 0007 同类缺陷，与 ``omni_mcp/orchestrator._split_allowlist``
+    同一模式）：旧实现在所有平台上都优先按 ``":"`` 切分（``separators = [":", ";"]``）。
+    Windows 盘符本身含 ``":"``，于是 ``ORF_MCP_ALLOWED_DIRS=C:\\work``（以及文档里
+    展示的 ``C:\\a;C:\\b`` 写法）被切成 ``["C", "\\work"]`` —— 解析出的目录都不包含
+    目标路径，allowlist 在 Windows 上等于完全失效，任何合法路径都被判
+    ``PATH_NOT_ALLOWED``（复现：``tests/test_orf_security_attacks.py`` 的两条
+    happy-path 用例）。
+
+    现在按 ``os.pathsep``（POSIX ``":"``、Windows ``";"``）加逗号切分：Linux/CI
+    行为与修复前一致，Windows 上盘符不再被误切。三份实现（OPP/OL/ORF 的
+    allowlist 入口）由 ``tests/security/test_path_policy_parity.py`` 锁定一致性。
     """
     value = value.strip()
     if not value:
         return []
-    separators = [":", ";"]
-    for sep in separators:
-        if sep in value:
-            paths = [Path(p.strip()) for p in value.split(sep) if p.strip()]
-            if paths:
-                return paths
-            break
-    return [Path(value)]
+    parts: List[str] = []
+    for chunk in value.split(os.pathsep):
+        parts.extend(chunk.split(","))
+    return [Path(p.strip()) for p in parts if p.strip()]
 
 
 def _load_from_yaml(config_path: Path) -> Optional[dict]:
