@@ -8,7 +8,15 @@ repos:
     hooks:
       - id: check-secrets
         name: check-secrets (offline credential/URL scan)
-        entry: python3 scripts/check-secrets.py
+        # Interpreter comes from scripts/pre_commit_python.sh — the same resolver
+        # the suite uses. A bare `python3` hits the Microsoft Store execution
+        # alias stub under Git Bash/CMD (exit 49) and is absent under WSL;
+        # `language: python` is no better, because pre-commit would then
+        # `pip install .` this repo into a throwaway hook env (build isolation
+        # needs the index -> fails offline, and drags in the whole dependency
+        # tree). The resolver probes candidates by executing them; no network.
+        # check-secrets.py itself is stdlib-only.
+        entry: bash scripts/pre_commit_python.sh scripts/check-secrets.py
         language: system
         stages: [pre-commit]
         pass_filenames: true
