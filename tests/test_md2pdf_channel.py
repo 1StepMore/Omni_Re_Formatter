@@ -127,9 +127,16 @@ class TestMD2PDFConverter:
         assert result.success is False
         assert "not in PATH" in result.errors[0].message
 
-    def test_convert_weasyprint_import_error(self, sample_md: Path, tmp_path: Path):
+    @patch("subprocess.run")
+    def test_convert_weasyprint_import_error(self, mock_run, sample_md: Path, tmp_path: Path):
         output = tmp_path / "output.pdf"
 
+        # Simulate BOTH engines unavailable: WeasyPrint absent AND pandoc not
+        # installed. Patching importlib.util.find_spec alone is NOT deterministic
+        # (e2e#56): on runners that ship pandoc + a TeX PDF engine, the pandoc
+        # fallback succeeds and produces a real PDF, so the failure path must be
+        # forced explicitly to assert the graceful, crash-free contract.
+        mock_run.side_effect = FileNotFoundError()
         # Patch importlib.util.find_spec to simulate weasyprint not installed
         with patch("importlib.util.find_spec") as mock_find_spec:
             mock_find_spec.return_value = None  # simulate weasyprint not installed
@@ -137,10 +144,8 @@ class TestMD2PDFConverter:
             converter = MD2PDFConverter()
             result = converter.convert(sample_md, output, ConverterOptions(engine="weasyprint"))
 
-            # Graceful fallback: when weasyprint is unavailable the converter
-            # falls back to pandoc rather than raising. With pandoc also
-            # unable to produce PDF (pdflatex missing on CI), the result is
-            # a clean failure naming the engine — never a crash.
+            # Graceful fallback: when neither engine can render, the converter
+            # returns a clean failure naming the engine — never a crash.
             assert result.success is False
             assert result.errors, "expected a clear error from the fallback path"
 
