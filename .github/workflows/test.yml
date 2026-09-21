@@ -152,7 +152,11 @@ jobs:
         run: |
           rm -rf Omni_Re_Formatter
           cp -r ../orf-src Omni_Re_Formatter
-          uv pip install --python .venv/bin/python -e ./Omni_Re_Formatter
+          # The scenario library's fixture/assert steps need OPP's dep surface
+          # (python-docx, python-pptx, openpyxl, pandas) + the `opp` CLI
+          # (skeleton.zip builders), and ORF's weasyprint extra covers the
+          # PDF scenarios. `uv sync --locked` installs neither.
+          uv pip install --python .venv/bin/python -e ./Omni_Re_Formatter -e ./Omni_Pre_Processor weasyprint
 
       - name: Run ORF validation scenarios (tier 1, hermetic)
         working-directory: suite
@@ -161,4 +165,4 @@ jobs:
           ORF_MCP_ALLOWED_DIRS: /tmp
           OMNI_RATE_LIMIT_RPM: "0"
         run: |
-          .venv/bin/python scripts/validation/run_validation.py --module orf --tier 1
+          .venv/bin/python scripts/validation/run_validation.py --module orf --tier 1 --verbose
