@@ -99,6 +99,8 @@ jobs:
     needs: test
     steps:
       - uses: actions/checkout@v4
+        with:
+          path: orf-src
 
       - name: Clone Omni Suite (engine + scenarios + fixtures)
         uses: actions/checkout@v4
@@ -148,7 +150,7 @@ jobs:
         working-directory: suite
         run: |
           rm -rf Omni_Re_Formatter
-          cp -r ${{ github.workspace }} Omni_Re_Formatter
+          cp -r ../orf-src Omni_Re_Formatter
           uv pip install --python .venv/bin/python -e ./Omni_Re_Formatter
 
       - name: Run ORF validation scenarios (tier 1, hermetic)
