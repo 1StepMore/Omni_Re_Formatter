@@ -120,6 +120,7 @@ jobs:
           version: "0.11.8"
 
       - name: Verify uv.lock is up to date (fail-loud guard)
+        working-directory: orf-src
         run: uv --no-config lock --check
 
       - name: Install system deps (pandoc + weasyprint C libs for real conversions)
