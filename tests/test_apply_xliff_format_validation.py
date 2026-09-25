@@ -8,7 +8,9 @@ a clear click.BadParameter pointing to the format mismatch.
 """
 from __future__ import annotations
 
+import os
 import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -18,12 +20,24 @@ _VENV_PYTHON = Path(__file__).resolve().parents[2] / ".venv_ol" / "bin" / "pytho
 
 
 def _run_orf_cli(*args: str) -> subprocess.CompletedProcess:
-    """Run ORF CLI as a subprocess (matches production invocation)."""
+    """Run ORF CLI as a subprocess (matches production invocation).
+
+    ORF keeps a content-addressed output cache under ``OMNI_CACHE_DIR``
+    (default ``~/.omni_cache``). A warm entry short-circuits the conversion and
+    prints ``Created ... (cached)`` instead of the FORCE MODE warning, so these
+    CLI-contract tests would depend on whatever ran before them in the same job.
+    Give every invocation its own cache root to keep them order-independent.
+    """
     cmd = [str(_VENV_PYTHON), "-m", "orf", *args]
-    env_add = {"PYTHONPATH": str(_ORF_SRC)}
-    import os
-    env = {**os.environ, **env_add}
-    return subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=30)
+    with tempfile.TemporaryDirectory(prefix="orf-cli-cache-") as cache_dir:
+        env = {
+            **os.environ,
+            "PYTHONPATH": str(_ORF_SRC),
+            "OMNI_CACHE_DIR": cache_dir,
+        }
+        return subprocess.run(
+            cmd, capture_output=True, text=True, env=env, timeout=30
+        )
 
 
 def test_apply_xliff_rejects_docx_skeleton_with_odt_format(tmp_path):
