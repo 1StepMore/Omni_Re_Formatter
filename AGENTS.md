@@ -94,9 +94,9 @@ src/orf/
 | `ping` | Health check (returns version) |
 | `get_capabilities` | Return ORF module capabilities: supported MD output formats (16), XLIFF backfill formats (5), input formats, and available MCP tools |
 
-For full per-tool parameter reference, see the suite-level
-[AGENTS.md → MCP Tool Reference](https://github.com/1StepMore/e2e-test-suite/blob/main/AGENTS.md) table,
-or [agent-pipeline-guide.md](https://github.com/1StepMore/e2e-test-suite/blob/main/docs/agent-pipeline-guide.md).
+For full per-tool parameter reference, see this module's [`docs/API.md`](docs/API.md).
+The suite-level [agent-pipeline-guide.md](https://github.com/1StepMore/e2e-test-suite/blob/main/docs/agent-pipeline-guide.md)
+covers server/tool inventory and namespacing.
 
 ## 16 output formats + their conversion engines
 
@@ -282,7 +282,7 @@ for the complete decision tree and format support matrix.
 ## Pointers to the suite-level docs
 
 - Cross-module orchestration: [AGENTS.md](https://github.com/1StepMore/e2e-test-suite/blob/main/AGENTS.md)
-- MCP tool full parameter reference: [agent-pipeline-guide.md](https://github.com/1StepMore/e2e-test-suite/blob/main/docs/agent-pipeline-guide.md)
+- MCP tool full parameter reference: [`docs/API.md`](docs/API.md)
 - Pre-commit hooks: [.pre-commit-config.yaml](https://github.com/1StepMore/e2e-test-suite/blob/main/.pre-commit-config.yaml)
 - Compatibility matrix: [COMPATIBILITY.md](https://github.com/1StepMore/e2e-test-suite/blob/main/COMPATIBILITY.md)
 
