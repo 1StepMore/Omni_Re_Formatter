@@ -31,9 +31,6 @@ import os
 import re
 import zipfile
 from pathlib import Path
-from unittest.mock import MagicMock, patch
-
-import pytest
 
 from orf.channels.xliff2docx import (
     XLIFF2DOCXConverter,
@@ -47,7 +44,6 @@ from orf.channels.xliff2docx import (
 
 def _build_minimal_docx(docx_path: Path, paragraphs: list[str]) -> Path:
     """Build a minimal DOCX with one ``<w:p>`` per string in ``paragraphs``."""
-    import shutil
     import tempfile
 
     docx_path.parent.mkdir(parents=True, exist_ok=True)
@@ -133,6 +129,22 @@ def _build_xliff(
 def _read_docx_xml(docx_path: Path) -> str:
     with zipfile.ZipFile(docx_path) as z:
         return z.read("word/document.xml").decode("utf-8")
+
+
+def _visible_wt_texts(docx_path: Path) -> list[str]:
+    """Return the USER-VISIBLE text of every ``<w:t>``, entities decoded.
+
+    Unlike a raw-XML regex, this parses the DOCX XML with lxml so that
+    ``&amp;lt;`` (a literal ``&lt;`` the user would SEE) is distinguished
+    from ``&lt;`` (the XML serialization of a real ``<`` character).
+    """
+    from lxml import etree
+
+    with zipfile.ZipFile(docx_path) as z:
+        xml_bytes = z.read("word/document.xml")
+    root = etree.fromstring(xml_bytes)
+    ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+    return [t.text or "" for t in root.xpath("//w:t", namespaces=ns)]
 
 
 def _assert_no_bx_ex_in_text(out_xml: str) -> None:
@@ -423,3 +435,152 @@ class TestFuzzyBackfillSafetyStrip:
 
         out_xml = _read_docx_xml(output_path)
         _assert_no_bx_ex_in_text(out_xml)
+
+
+class TestDoubleEscapedBxEx:
+    """E2E-06b: XLIFF target markup escaped twice (``&amp;lt;bx``).
+
+    lxml resolves the first layer, leaving a literal ``&lt;bx`` string that
+    leaks into user-visible DOCX text unless the parse boundary unescapes it.
+    """
+
+    def test_double_escaped_bx_ex_produces_no_visible_leak(self, tmp_path: Path):
+        source = '<bx id="1" type="bold"/>《爱上海尔》<ex id="1"/>'
+        # &amp;lt; resolves once to &lt;, so the converter sees "&lt;bx ...".
+        target_double_escaped = (
+            '&amp;lt;bx id="1" type="bold"/&amp;gt;I Love Shanghai, Er'
+            '&amp;lt;ex id="1"/&amp;gt;'
+        )
+
+        docx_path = _build_minimal_docx(
+            tmp_path / "input.docx", paragraphs=["PLACEHOLDER_BODY"]
+        )
+        xliff_path = _build_xliff(
+            tmp_path / "input.xlf",
+            trans_units=[
+                {
+                    "id": "1",
+                    "resname": "para_index_0",
+                    "source": source,
+                    "target": target_double_escaped,
+                }
+            ],
+        )
+        output_path = tmp_path / "output.docx"
+
+        result = XLIFF2DOCXConverter().convert(docx_path, xliff_path, output_path)
+        assert result.success, f"convert failed: {result.errors}"
+
+        visible = "".join(_visible_wt_texts(output_path))
+        assert "&lt;bx" not in visible and "&lt;ex" not in visible, (
+            "BUG: double-escaped entity markup leaked into user-visible "
+            f"DOCX text: {visible!r}"
+        )
+        assert "<bx" not in visible and "<ex" not in visible, (
+            f"BUG: literal <bx>/<ex> leaked into user-visible text: {visible!r}"
+        )
+        assert "I Love Shanghai, Er" in visible, (
+            f"Translated text missing from output. visible={visible!r}"
+        )
+
+    def test_double_escaped_bx_ex_applies_bold_rpr(self, tmp_path: Path):
+        source = '<bx id="1" type="bold"/>《爱上海尔》<ex id="1"/>'
+        target_double_escaped = (
+            '&amp;lt;bx id="1" type="bold"/&amp;gt;I Love Shanghai, Er'
+            '&amp;lt;ex id="1"/&amp;gt;'
+        )
+
+        docx_path = _build_minimal_docx(
+            tmp_path / "input.docx", paragraphs=["PLACEHOLDER_BODY"]
+        )
+        xliff_path = _build_xliff(
+            tmp_path / "input.xlf",
+            trans_units=[
+                {
+                    "id": "1",
+                    "resname": "para_index_0",
+                    "source": source,
+                    "target": target_double_escaped,
+                }
+            ],
+        )
+        output_path = tmp_path / "output.docx"
+
+        result = XLIFF2DOCXConverter().convert(docx_path, xliff_path, output_path)
+        assert result.success, f"convert failed: {result.errors}"
+
+        out_xml = _read_docx_xml(output_path)
+        assert "<w:b/>" in out_xml or "<w:b " in out_xml, (
+            f"BUG: bold rPr not applied for double-escaped markup.\n{out_xml}"
+        )
+        visible = "".join(_visible_wt_texts(output_path))
+        assert "I Love Shanghai, Er" in visible
+
+
+class TestEntityUnescapeScopedToXliff2Docx:
+    """E2E-06b scope guard: the double-escape unescape lives ONLY in the
+    xliff2docx parser (``parser._target_text``). The PPTX/EPUB/HTML channels
+    keep their existing extraction — broadening the unescape to them is a
+    deliberate, separately-documented decision, not a drive-by change.
+    """
+
+    DOUBLE_ESCAPED_TARGET: str = (
+        '&amp;lt;bx id="1" type="bold"/&amp;gt;I Love Shanghai, Er'
+        '&amp;lt;ex id="1"/&amp;gt;'
+    )
+
+    def _xliff_path(self, tmp_path: Path) -> Path:
+        return _build_xliff(
+            tmp_path / "input.xlf",
+            trans_units=[{
+                "id": "1",
+                "source": "《爱上海尔》",
+                "target": self.DOUBLE_ESCAPED_TARGET,
+            }],
+        )
+
+    def test_docx_parser_resolves_double_escaped_markup(self, tmp_path: Path):
+        from orf.channels.xliff2docx import XLIFF2DOCXConverter
+
+        units = XLIFF2DOCXConverter()._parse_xliff(self._xliff_path(tmp_path))
+        target = units[0]["target"]
+        assert isinstance(target, str)
+        assert '<bx id="1"' in target and '<ex id="1"' in target, (
+            f"DOCX parser must unescape double-escaped inline markup; "
+            f"target={target!r}"
+        )
+
+    def test_pptx_parser_does_not_unescape(self, tmp_path: Path):
+        from orf.channels.xliff2pptx import XLIFF2PPTXConverter
+
+        parsed = XLIFF2PPTXConverter()._parse_xliff(self._xliff_path(tmp_path))
+        target = parsed["units"][0]["target"]
+        assert isinstance(target, str)
+        assert "<bx" not in target and "<ex" not in target, (
+            f"PPTX parser must stay entity-encoded (scope guard); "
+            f"target={target!r}"
+        )
+        assert "lt;bx" in target, f"PPTX target unexpectedly rewritten: {target!r}"
+
+    def test_epub_parser_does_not_unescape(self, tmp_path: Path):
+        from orf.channels.xliff2epub import XLIFF2EPUBConverter
+
+        segments = XLIFF2EPUBConverter()._parse_xliff(self._xliff_path(tmp_path))
+        target = segments["1"]
+        assert "<bx" not in target and "<ex" not in target, (
+            f"EPUB parser must stay entity-encoded (scope guard); "
+            f"target={target!r}"
+        )
+        assert "lt;bx" in target, f"EPUB target unexpectedly rewritten: {target!r}"
+
+    def test_html_parser_does_not_unescape(self, tmp_path: Path):
+        from orf.channels.xliff2html.parser import parse_xliff
+
+        translations = parse_xliff(
+            self._xliff_path(tmp_path).read_text(encoding="utf-8")
+        )
+        target = translations["1"]
+        assert "<bx" not in target and "<ex" not in target, (
+            f"HTML parser must stay entity-encoded (scope guard); "
+            f"target={target!r}"
+        )

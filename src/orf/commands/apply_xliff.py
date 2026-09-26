@@ -330,7 +330,10 @@ def apply_xliff(
             f"       Use --format <format> to specify"
         )
 
-    if not converter.validate_input(input_path):
+    # e2e-test-suite#86: honor --force here like the two skeleton checks
+    # above — without this guard a raw cross-format skeleton is re-rejected
+    # after already passing with a FORCE MODE warning.
+    if not force and not converter.validate_input(input_path):
         raise click.ClickException(
             f"Input file '{input_path}' is not valid for {format} format. "
             f"Skeleton file must have a valid extension (.{format} or .zip)."

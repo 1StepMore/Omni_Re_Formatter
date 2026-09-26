@@ -8,8 +8,9 @@ a clear click.BadParameter pointing to the format mismatch.
 """
 from __future__ import annotations
 
+import os
 import subprocess
-import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -19,12 +20,24 @@ _VENV_PYTHON = Path(__file__).resolve().parents[2] / ".venv_ol" / "bin" / "pytho
 
 
 def _run_orf_cli(*args: str) -> subprocess.CompletedProcess:
-    """Run ORF CLI as a subprocess (matches production invocation)."""
+    """Run ORF CLI as a subprocess (matches production invocation).
+
+    ORF keeps a content-addressed output cache under ``OMNI_CACHE_DIR``
+    (default ``~/.omni_cache``). A warm entry short-circuits the conversion and
+    prints ``Created ... (cached)`` instead of the FORCE MODE warning, so these
+    CLI-contract tests would depend on whatever ran before them in the same job.
+    Give every invocation its own cache root to keep them order-independent.
+    """
     cmd = [str(_VENV_PYTHON), "-m", "orf", *args]
-    env_add = {"PYTHONPATH": str(_ORF_SRC)}
-    import os
-    env = {**os.environ, **env_add}
-    return subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=30)
+    with tempfile.TemporaryDirectory(prefix="orf-cli-cache-") as cache_dir:
+        env = {
+            **os.environ,
+            "PYTHONPATH": str(_ORF_SRC),
+            "OMNI_CACHE_DIR": cache_dir,
+        }
+        return subprocess.run(
+            cmd, capture_output=True, text=True, env=env, timeout=30
+        )
 
 
 def test_apply_xliff_rejects_docx_skeleton_with_odt_format(tmp_path):
@@ -381,4 +394,211 @@ class TestSkeletonContentValidation:
         combined = result.stdout + result.stderr
         assert "Skeleton" in combined, (
             f"Error message should contain 'Skeleton'; got:\n{combined}"
+        )
+
+
+class TestForceBypassesFinalConverterGate:
+    """e2e-test-suite#86: the final converter ``validate_input`` gate must
+    honor ``--force``.
+
+    The two CLI-level skeleton checks (extension check + ZIP content-level
+    check) already honor ``--force`` by emitting a FORCE MODE warning and
+    proceeding. But the last gate before conversion —
+    ``if not converter.validate_input(input_path)`` in ``apply_xliff.py`` —
+    re-rejected inputs the earlier checks had allowed through, so a raw
+    cross-format skeleton (e.g. DOCX-named input with ``--format pptx
+    --force``) still exited 1 with
+    ``"Input file ... is not valid for pptx format"``. That contradicts the
+    documented ``--force`` contract (warn + proceed) and breaks the suite's
+    ``test_cross_format_e2e.py::TestCrossFormat::test_path_34_docx_xliff_to_pptx_force``.
+    """
+
+    def test_force_raw_docx_input_pptx_not_rejected_by_final_gate(self, tmp_path):
+        """Raw .docx input + --format pptx --force must pass the final gate.
+
+        The input is a valid DOCX zip named ``.docx`` (not a skeleton.zip):
+        the extension check fires its FORCE MODE warning, the content-level
+        ZIP check does not apply, and the final ``validate_input`` gate must
+        not re-reject. Conversion then repacks the DOCX zip as the output
+        (per the --force contract: "may produce broken output").
+        """
+        skeleton = tmp_path / "input.docx"
+        _create_docx_skeleton_zip(skeleton)
+        xlf = tmp_path / "translation.xlf"
+        _create_xliff(xlf, source="Hello World", target="Hello World")
+        output = tmp_path / "out.pptx"
+
+        result = _run_orf_cli(
+            "apply-xliff", str(skeleton),
+            "--xliff", str(xlf),
+            "--output", str(output),
+            "--format", "pptx",
+            "--force",
+        )
+        combined = result.stdout + result.stderr
+        # The exact bug signature (apply_xliff.py final gate) must be absent.
+        assert "is not valid for" not in combined, (
+            f"--force must bypass the final converter validate_input gate; "
+            f"got:\n{combined}"
+        )
+        # BadParameter produces "Error: Invalid value:" — must be absent
+        assert "Invalid value" not in combined, (
+            f"--force must not produce BadParameter; got:\n{combined}"
+        )
+        # The extension check's FORCE MODE warning must still be emitted
+        assert "FORCE MODE" in combined, (
+            f"--force must emit FORCE MODE warning; got:\n{combined}"
+        )
+        assert result.returncode == 0, (
+            f"--force raw .docx → pptx should exit 0 (repacked zip); "
+            f"rc={result.returncode}\nstdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+        assert output.exists(), (
+            f"--force conversion must produce an output file; got:\n{combined}"
+        )
+
+    def test_no_force_raw_docx_pptx_still_rejected(self, tmp_path):
+        """Without --force, raw .docx + --format pptx must still be rejected.
+
+        Guards the fix against over-weakening: the non-force rejection
+        (extension-check BadParameter) is preserved.
+        """
+        skeleton = tmp_path / "input.docx"
+        _create_docx_skeleton_zip(skeleton)
+        xlf = tmp_path / "translation.xlf"
+        _create_xliff(xlf)
+        output = tmp_path / "out.pptx"
+
+        result = _run_orf_cli(
+            "apply-xliff", str(skeleton),
+            "--xliff", str(xlf),
+            "--output", str(output),
+            "--format", "pptx",
+        )
+        assert result.returncode != 0, (
+            f"Expected non-zero exit without --force; got {result.returncode}\n"
+            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+        combined = result.stdout + result.stderr
+        assert "does not match" in combined, (
+            f"Cross-format .docx→pptx without --force must be rejected by the "
+            f"extension check; got:\n{combined}"
+        )
+
+
+# e2e-test-suite#86 relaxed the last skeleton gate to
+# `if not force and not converter.validate_input(...)`. The non-force branch
+# must keep rejecting for every supported target format; `json` returns before
+# the gate and is intentionally excluded.
+
+_GATE_FORMATS = ["docx", "pptx", "epub", "html", "odt", "pdf"]
+
+# docx already owns .docx, so its foreign extension is .pptx; .docx is foreign
+# to every other format.
+_FOREIGN_SKELETON_EXT = {
+    "docx": ".pptx",
+    "pptx": ".docx",
+    "epub": ".docx",
+    "html": ".docx",
+    "odt": ".docx",
+    "pdf": ".docx",
+}
+
+
+class TestNonForceTypeRejectionAcrossFormats:
+    """Non-force extension (type) rejection for every target format."""
+
+    @pytest.mark.parametrize("fmt", _GATE_FORMATS)
+    def test_foreign_extension_rejected_without_force(self, tmp_path, fmt):
+        skeleton = tmp_path / f"input{_FOREIGN_SKELETON_EXT[fmt]}"
+        skeleton.write_bytes(b"PK\x03\x04")
+        xlf = tmp_path / "translation.xlf"
+        _create_xliff(xlf)
+        output = tmp_path / f"out.{fmt}"
+
+        result = _run_orf_cli(
+            "apply-xliff", str(skeleton),
+            "--xliff", str(xlf),
+            "--output", str(output),
+            "--format", fmt,
+        )
+        combined = result.stdout + result.stderr
+        assert result.returncode != 0, (
+            f"{fmt}: foreign skeleton must be rejected without --force; got "
+            f"rc={result.returncode}\n{combined}"
+        )
+        assert "does not match" in combined, (
+            f"{fmt}: expected extension-mismatch rejection; got:\n{combined}"
+        )
+
+
+class TestFinalGateNonForceRejectionAcrossFormats:
+    """The exact guard changed by e2e-test-suite#86 must still reject
+    non-force inputs.
+
+    An extensionless skeleton slips past both CLI-level checks — the
+    extension check short-circuits on an empty suffix and the ZIP check
+    requires a ``.zip`` suffix — so the final ``validate_input`` gate is
+    the only thing that can reject it. These tests therefore exercise the
+    changed guard's non-force branch directly, for every format.
+    """
+
+    @pytest.mark.parametrize("fmt", _GATE_FORMATS)
+    def test_extensionless_skeleton_rejected_by_final_gate(self, tmp_path, fmt):
+        skeleton = tmp_path / "skeleton"  # no suffix → earlier checks skip
+        skeleton.write_bytes(b"PK\x03\x04")
+        xlf = tmp_path / "translation.xlf"
+        _create_xliff(xlf)
+        output = tmp_path / f"out.{fmt}"
+
+        result = _run_orf_cli(
+            "apply-xliff", str(skeleton),
+            "--xliff", str(xlf),
+            "--output", str(output),
+            "--format", fmt,
+        )
+        combined = result.stdout + result.stderr
+        assert result.returncode != 0, (
+            f"{fmt}: extensionless skeleton must be rejected by the final "
+            f"gate without --force; got rc={result.returncode}\n{combined}"
+        )
+        assert f"is not valid for {fmt} format" in combined, (
+            f"{fmt}: expected the final validate_input gate to fire; "
+            f"got:\n{combined}"
+        )
+
+
+class TestNonForceContentRejectionAcrossZipFormats:
+    """Non-force ZIP content-level rejection for the EPUB target.
+
+    The docx↔pptx directions are already pinned by
+    ``TestSkeletonContentValidation``; these complete the trio of
+    ZIP-backed formats so content-level rejection is proven for each.
+    """
+
+    @pytest.mark.parametrize("builder", ["docx", "pptx"])
+    def test_zip_content_mismatch_rejected_without_force(self, tmp_path, builder):
+        skeleton = tmp_path / "input.skeleton.zip"
+        if builder == "docx":
+            _create_docx_skeleton_zip(skeleton)
+        else:
+            _create_pptx_skeleton_zip(skeleton)
+        xlf = tmp_path / "translation.xlf"
+        _create_xliff(xlf)
+        output = tmp_path / "out.epub"
+
+        result = _run_orf_cli(
+            "apply-xliff", str(skeleton),
+            "--xliff", str(xlf),
+            "--output", str(output),
+            "--format", "epub",
+        )
+        combined = result.stdout + result.stderr
+        assert result.returncode != 0, (
+            f"{builder}-content zip with --format epub must be rejected "
+            f"without --force; got rc={result.returncode}\n{combined}"
+        )
+        assert "Skeleton ZIP contains" in combined, (
+            f"{builder}-content zip vs epub: expected content-level "
+            f"rejection; got:\n{combined}"
         )

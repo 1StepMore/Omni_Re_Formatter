@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
+from xml.sax.saxutils import unescape as _xml_unescape
 
 from lxml import etree
 
@@ -49,6 +50,25 @@ def _strip_inline_tags(target_text: str) -> str:
     """
     from ._ns import _INLINE_TAGS_RE
     return _INLINE_TAGS_RE.sub('', target_text)
+
+
+_XML_ENTITY_MAP = {"&quot;": '"'}
+
+
+def _target_text(target_el: etree._Element | None) -> str:
+    """Extract target text, resolving one extra XML-escaping layer.
+
+    lxml's ``itertext()`` already resolves XML text-node escaping.  When a
+    producer escaped inline markup twice (``&amp;lt;bx`` in the file) the
+    extraction leaves a literal ``&lt;bx``; unescaping once more restores the
+    real ``<bx>``/``<ex>`` markup every downstream backfill path expects.
+    """
+    if target_el is None:
+        return ""
+    return _xml_unescape(
+        _strip_wrapper("".join(target_el.itertext())),
+        _XML_ENTITY_MAP,
+    )
 
 
 def parse_xliff(
@@ -133,9 +153,7 @@ def parse_xliff(
                     source_text = (
                         "".join(source_el.itertext()) if source_el is not None else ""
                     )
-                    target_text = _strip_wrapper(
-                        "".join(target_el.itertext()) if target_el is not None else ""
-                    )
+                    target_text = _target_text(target_el)
 
                     source_xml = etree.tostring(source_el, encoding="unicode") if source_el is not None else ""
                     inline_elements = extract_inline_elements_from_xml(source_xml, inline_parser)
@@ -159,9 +177,7 @@ def parse_xliff(
                 source_text = (
                     "".join(source_el.itertext()) if source_el is not None else ""
                 )
-                target_text = _strip_wrapper(
-                    "".join(target_el.itertext()) if target_el is not None else ""
-                )
+                target_text = _target_text(target_el)
 
                 source_xml = etree.tostring(source_el, encoding="unicode") if source_el is not None else ""
                 inline_elements = extract_inline_elements_from_xml(source_xml, inline_parser)
@@ -199,9 +215,7 @@ def _process_trans_unit(
     source_text = (
         "".join(source_el.itertext()) if source_el is not None else ""
     )
-    target_text = _strip_wrapper(
-        "".join(target_el.itertext()) if target_el is not None else ""
-    )
+    target_text = _target_text(target_el)
 
     # Extract inline elements from source
     source_xml = etree.tostring(source_el, encoding="unicode") if source_el is not None else ""
