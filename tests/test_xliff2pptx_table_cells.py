@@ -15,14 +15,14 @@ from pathlib import Path
 from unittest.mock import patch
 
 from lxml import etree
-from pptx import Presentation
-from pptx.util import Inches
 
 from orf.channels.xliff2pptx import XLIFF2PPTXConverter
 
 A_NS = "http://schemas.openxmlformats.org/drawingml/2006/main"
 P_NS = "http://schemas.openxmlformats.org/presentationml/2006/main"
 R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+REL_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
+CT_NS = "http://schemas.openxmlformats.org/package/2006/content-types"
 
 A = f"{{{A_NS}}}"
 P = f"{{{P_NS}}}"
@@ -61,25 +61,111 @@ def _plain_unit(uid: str, source: str, target: str) -> str:
 
 # ── PPTX fixtures ─────────────────────────────────────────────────────────
 
+# PPTX is just an OPC ZIP.  These fixtures are hand-built from raw slide XML
+# (mirroring tests/test_xliff2pptx_channel.py and
+# tests/test_xliff2docx_table_cells.py) so the suite carries no python-pptx
+# dependency.  The parts below are the minimum the converter reads: it resolves
+# presentation order from p:sldIdLst -> presentation.xml.rels, then walks
+# a:tbl/a:tr/a:tc in each slide part.
+
+
+def _table_cell_xml(value: object) -> str:
+    """One a:tc; a list value becomes one paragraph per item."""
+    paras = value if isinstance(value, list) else [value]
+    body = "".join(
+        f"<a:p><a:r><a:t>{para}</a:t></a:r></a:p>" for para in paras
+    )
+    return f"<a:tc><a:txBody>{body}</a:txBody></a:tc>"
+
+
+def _table_xml(cells: dict[tuple[int, int], object]) -> str:
+    max_row = max(r for r, _c in cells)
+    max_col = max(c for _r, c in cells)
+    rows = "".join(
+        "<a:tr>"
+        + "".join(_table_cell_xml(cells.get((r, c), "")) for c in range(max_col + 1))
+        + "</a:tr>"
+        for r in range(max_row + 1)
+    )
+    return (
+        "<p:graphicFrame><a:graphic><a:graphicData "
+        'uri="http://schemas.openxmlformats.org/drawingml/2006/table">'
+        f"<a:tbl>{rows}</a:tbl>"
+        "</a:graphicData></a:graphic></p:graphicFrame>"
+    )
+
+
+def _slide_xml(spec: dict) -> str:
+    shapes: list[str] = []
+    for text in spec.get("textboxes", []):
+        shapes.append(
+            "<p:sp><p:txBody><a:p><a:r>"
+            f"<a:t>{text}</a:t>"
+            "</a:r></a:p></p:txBody></p:sp>"
+        )
+    for _rows, _cols, cells in spec.get("tables", []):
+        shapes.append(_table_xml(cells))
+    return (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+        f'<p:sld xmlns:p="{P_NS}" xmlns:a="{A_NS}" xmlns:r="{R_NS}">'
+        "<p:cSld><p:spTree>"
+        + "".join(shapes)
+        + "</p:spTree></p:cSld></p:sld>"
+    )
+
 
 def _build_deck(path: Path, slides: list[dict]) -> Path:
-    """Build a real .pptx.  Each slide spec: {"tables": [(rows, cols, cells)],
-    "textboxes": [str]}"""
-    prs = Presentation()
-    blank = prs.slide_layouts[6]
-    for spec in slides:
-        slide = prs.slides.add_slide(blank)
-        for rows, cols, cells in spec.get("tables", []):
-            graphic_frame = slide.shapes.add_table(
-                rows, cols, Inches(1), Inches(1), Inches(4), Inches(2)
-            )
-            table = graphic_frame.table
-            for (row, col), text in cells.items():
-                table.cell(row, col).text = text
-        for text in spec.get("textboxes", []):
-            box = slide.shapes.add_textbox(Inches(1), Inches(4), Inches(4), Inches(1))
-            box.text_frame.text = text
-    prs.save(str(path))
+    """Hand-build a minimal .pptx ZIP.  Each slide spec: {"tables":
+    [(rows, cols, {(row, col): text | [paragraph, ...]})], "textboxes": [str]}.
+
+    sldIdLst lists the slides in filename order; ``_reverse_sldid_order`` is the
+    helper that breaks that agreement.
+    """
+    presentation = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+        f'<p:presentation xmlns:p="{P_NS}" xmlns:a="{A_NS}" xmlns:r="{R_NS}">'
+        "<p:sldIdLst>"
+        + "".join(
+            f'<p:sldId id="{256 + i}" r:id="rId{i + 1}"/>'
+            for i in range(len(slides))
+        )
+        + "</p:sldIdLst></p:presentation>"
+    )
+    presentation_rels = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+        f'<Relationships xmlns="{REL_NS}">'
+        + "".join(
+            f'<Relationship Id="rId{i + 1}" '
+            'Type="http://schemas.openxmlformats.org/officeDocument/2006/'
+            f'relationships/slide" Target="slides/slide{i + 1}.xml"/>'
+            for i in range(len(slides))
+        )
+        + "</Relationships>"
+    )
+    root_rels = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+        f'<Relationships xmlns="{REL_NS}">'
+        '<Relationship Id="rId1" '
+        'Type="http://schemas.openxmlformats.org/officeDocument/2006/'
+        'relationships/officeDocument" Target="ppt/presentation.xml"/>'
+        "</Relationships>"
+    )
+    content_types = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n'
+        f'<Types xmlns="{CT_NS}">'
+        '<Default Extension="rels" ContentType="application/vnd.'
+        'openxmlformats-package.relationships+xml"/>'
+        '<Default Extension="xml" ContentType="application/xml"/>'
+        "</Types>"
+    )
+
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("[Content_Types].xml", content_types)
+        zf.writestr("_rels/.rels", root_rels)
+        zf.writestr("ppt/presentation.xml", presentation)
+        zf.writestr("ppt/_rels/presentation.xml.rels", presentation_rels)
+        for i, spec in enumerate(slides):
+            zf.writestr(f"ppt/slides/slide{i + 1}.xml", _slide_xml(spec))
     return path
 
 
@@ -144,20 +230,36 @@ def _run_texts(root: etree._Element) -> list[str]:
     ]
 
 
-def _reopen_tables(path: Path) -> list[list[list[str]]]:
+def _slide_names_in_presentation_order(files: dict[str, bytes]) -> list[str]:
+    pres = etree.fromstring(files["ppt/presentation.xml"])
+    rels = etree.fromstring(files["ppt/_rels/presentation.xml.rels"])
+    rid_to_target = {
+        rel.get("Id"): rel.get("Target")
+        for rel in rels.findall(f"{{{REL_NS}}}Relationship")
+    }
+    return [
+        "ppt/" + rid_to_target[sld.get(R_ID)]
+        for sld in pres.xpath(".//p:sldIdLst/p:sldId", namespaces={"p": P_NS})
+    ]
+
+
+def _reopen_tables(path: Path) -> list[list[list[list[str]]]]:
     """Reopen a .pptx and return, per slide (sldIdLst order), each table grid."""
-    prs = Presentation(str(path))
-    slides: list[list[list[str]]] = []
-    for slide in prs.slides:
-        grids: list[list[list[str]]] = []
-        for shape in slide.shapes:
-            if shape.has_table:
-                table = shape.table
-                grids.append([
-                    [table.cell(r, c).text for c in range(len(table.columns))]
-                    for r in range(len(table.rows))
-                ])
-        slides.append(grids)
+    with zipfile.ZipFile(path) as zf:
+        files = {name: zf.read(name) for name in zf.namelist()}
+    slides: list[list[list[list[str]]]] = []
+    for name in _slide_names_in_presentation_order(files):
+        root = etree.fromstring(files[name])
+        slides.append([
+            [
+                [
+                    "".join(el.text or "" for el in tc.iter(f"{A}t"))
+                    for tc in tr.findall(f"{A}tc")
+                ]
+                for tr in tbl.findall(f"{A}tr")
+            ]
+            for tbl in root.iter(f"{A}tbl")
+        ])
     return slides
 
 
@@ -272,16 +374,10 @@ class TestPositionalTableCellBackfill:
         assert _reopen_tables(output)[0][0][0][0] == "X"
 
     def test_multi_paragraph_cell_replaces_all_source(self, tmp_path: Path):
-        skeleton = tmp_path / "deck.pptx"
-        prs = Presentation()
-        slide = prs.slides.add_slide(prs.slide_layouts[6])
-        table = slide.shapes.add_table(
-            1, 1, Inches(1), Inches(1), Inches(4), Inches(2)
-        ).table
-        frame = table.cell(0, 0).text_frame
-        frame.text = "IP"
-        frame.add_paragraph().text = "67"
-        prs.save(str(skeleton))
+        skeleton = _build_deck(
+            tmp_path / "deck.pptx",
+            [{"tables": [(1, 1, {(0, 0): ["IP", "67"]})]}],
+        )
 
         xliff = _xliff(_unit("1", "table_0_r0_c0", "IP\n67", "翻译"))
         output, _ = _convert(skeleton, tmp_path, xliff)
