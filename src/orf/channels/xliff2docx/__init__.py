@@ -215,6 +215,26 @@ class XLIFF2DOCXConverter(BaseConverter):
             _strip_inline_tags,
         )
 
+    def _backfill_by_table_cell(
+        self,
+        root: etree._Element,
+        table_index: int,
+        row: int,
+        col: int,
+        target_text: str,
+    ) -> bool:
+        """Issue A: positional backfill via ``resname="table_{t}_r{r}_c{c}"``.
+
+        Delegates to ``orf.channels.xliff2docx.matcher.backfill_by_table_cell``.
+        """
+        from orf.channels.xliff2docx.matcher import backfill_by_table_cell
+
+        return backfill_by_table_cell(
+            root, table_index, row, col, target_text,
+            self._build_formatted_runs,
+            _strip_inline_tags,
+        )
+
     def _backfill_fallback_textboxes(
         self,
         root: etree._Element,
@@ -710,6 +730,39 @@ class XLIFF2DOCXConverter(BaseConverter):
                             f"unit {tu_id} (have {len(all_paragraphs)} total "
                             f"paragraphs); falling back to text matching"
                         )
+
+                # Issue A: table_{t}_r{r}_c{c} positional lookup
+                table_cell = tu.get("table_cell")
+                if table_cell is not None:
+                    try:
+                        cell_applied = self._backfill_by_table_cell(
+                            root,
+                            table_cell[0],
+                            table_cell[1],
+                            table_cell[2],
+                            target_text,
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            f"Table-cell backfill failed for unit {tu_id} "
+                            f"at {table_cell}: {e}; falling back to text matching"
+                        )
+                        cell_applied = False
+                    if cell_applied:
+                        # ORF#33: apply source inline formatting if LLM dropped bx/ex
+                        root, _applied = self._apply_source_formatting(
+                            root, inline_elements, target_text,
+                        )
+                        if _applied and root is not None:
+                            # FIX-#9: rebuild lookup indexes from the new root
+                            (body_paragraphs, all_paragraphs,
+                             wt_text_map, body_paragraph_text_map,
+                             all_paragraph_text_map) = self._rebuild_indexes(root)
+                        continue
+                    logger.warning(
+                        f"table_cell {table_cell} out of range or missing for "
+                        f"unit {tu_id}; falling back to text matching"
+                    )
 
                 try:
                     self._backfill_translation(
