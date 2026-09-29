@@ -208,6 +208,102 @@ def backfill_by_non_body_position(
     return True
 
 
+def backfill_by_table_cell(
+    root: etree._Element,
+    table_index: int,
+    row: int,
+    col: int,
+    target_text: str,
+    build_formatted_runs_fn: Any,
+    strip_inline_tags_fn: Any,
+) -> bool:
+    """Issue A: apply target_text to the cell at ``(table_index, row, col)``.
+
+    Resolves the cell exactly like OPP's ``table_{t}_r{r}_c{c}`` resname
+    contract (raw node indices, no merged-cell/grid expansion):
+
+    * ``root.iter("w:tbl")`` → the ``table_index``-th table
+    * its direct ``./w:tr`` children → the ``row``-th
+    * its direct ``./w:tc`` children → the ``col``-th
+
+    Only the cell's direct paragraphs are considered (``./w:p``); nested
+    tables inside the cell are never descended into.  Inline ``<bx>``/``<ex>``
+    tags are honoured via ``build_formatted_runs_fn`` and newlines are
+    distributed across runs exactly like ``_distribute_text_across_runs``.
+
+    Returns False (with a warning) when the table, row, cell or its runs
+    are missing.
+    """
+    tables = list(root.iter(f"{{{W_NS}}}tbl"))
+    if not (0 <= table_index < len(tables)):
+        logger.warning(
+            "resname table_%d out of range (have %d tables)",
+            table_index, len(tables),
+        )
+        return False
+    table = tables[table_index]
+
+    rows = table.findall(f"{{{W_NS}}}tr")
+    if not (0 <= row < len(rows)):
+        logger.warning(
+            "resname table_%d_r%d out of range (have %d rows)",
+            table_index, row, len(rows),
+        )
+        return False
+    tr = rows[row]
+
+    cells = tr.findall(f"{{{W_NS}}}tc")
+    if not (0 <= col < len(cells)):
+        logger.warning(
+            "resname table_%d_r%d_c%d out of range (have %d cells)",
+            table_index, row, col, len(cells),
+        )
+        return False
+    tc = cells[col]
+
+    # Direct paragraphs of the cell only — do NOT descend into a nested tbl.
+    runs: list[etree._Element] = []
+    for p in tc.findall(f"{{{W_NS}}}p"):
+        runs.extend(p.xpath("./w:r/w:t", namespaces=WORD_NS_MAP))
+    if not runs:
+        logger.warning(
+            "resname table_%d_r%d_c%d has no runs to backfill",
+            table_index, row, col,
+        )
+        return False
+
+    # BX/EX leak fix: parse inline tags into formatted DOCX runs
+    formatted_runs = build_formatted_runs_fn(target_text)
+    has_real_inline_tags = bool(
+        re.search(
+            r"<\s*/?\s*bx\b|<\s*/?\s*ex\b",
+            target_text,
+        )
+    )
+    if formatted_runs and has_real_inline_tags:
+        target_run = runs[0]
+        parent = target_run.getparent()
+        if parent is not None:
+            parent_para = parent.getparent()
+            if parent_para is not None:
+                for i, fr in enumerate(formatted_runs):
+                    parent_para.insert(
+                        list(parent_para).index(parent) + i,
+                        fr,
+                    )
+                target_run.text = ""
+                for r in runs[1:]:
+                    r.text = ""
+                return True
+            target_run.text = strip_inline_tags_fn(target_text)
+            for r in runs[1:]:
+                r.text = ""
+            return True
+
+    _distribute_text_across_runs(runs, target_text)
+    return True
+
+
 def backfill_fallback_textboxes(
     root: etree._Element,
     chinese_to_target: dict[str, str],

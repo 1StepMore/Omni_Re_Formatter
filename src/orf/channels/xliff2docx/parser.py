@@ -6,6 +6,7 @@ inline formatting elements, used by the XLIFF2DOCXConverter class.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 from xml.sax.saxutils import unescape as _xml_unescape
@@ -23,6 +24,11 @@ from ._ns import (
 )
 
 logger = get_logger("channel.xliff2docx.parser")
+
+# Issue A: OPP emits one trans-unit per table cell with resname
+# ``table_{t}_r{r}_c{c}`` (raw node indices: t = table index over the whole
+# document, r = direct ``w:tr`` index, c = direct ``w:tc`` index).
+_TABLE_RESNAME_RE = re.compile(r"^table_(\d+)_r(\d+)_c(\d+)$")
 
 
 def _strip_wrapper(target_text: str) -> str:
@@ -159,7 +165,7 @@ def parse_xliff(
                     inline_elements = extract_inline_elements_from_xml(source_xml, inline_parser)
 
                     resname = seg.get("resname")
-                    para_index, non_body_index = _parse_resname(resname)
+                    para_index, non_body_index, table_cell = _parse_resname(resname)
 
                     trans_units.append({
                         "id": seg_id,
@@ -168,6 +174,7 @@ def parse_xliff(
                         "inline_elements": inline_elements,
                         "para_index": para_index,
                         "non_body_index": non_body_index,
+                        "table_cell": table_cell,
                     })
             else:
                 # No segments, treat whole unit as one trans-unit
@@ -183,7 +190,7 @@ def parse_xliff(
                 inline_elements = extract_inline_elements_from_xml(source_xml, inline_parser)
 
                 resname = unit.get("resname")
-                para_index, non_body_index = _parse_resname(resname)
+                para_index, non_body_index, table_cell = _parse_resname(resname)
 
                 trans_units.append({
                     "id": unit_id,
@@ -192,6 +199,7 @@ def parse_xliff(
                     "inline_elements": inline_elements,
                     "para_index": para_index,
                     "non_body_index": non_body_index,
+                    "table_cell": table_cell,
                 })
 
     logger.debug(f"Parsed {len(trans_units)} trans-units from {path}")
@@ -222,7 +230,7 @@ def _process_trans_unit(
     inline_elements = extract_inline_elements_from_xml(source_xml, inline_parser)
 
     resname = tu.get("resname")
-    para_index, non_body_index = _parse_resname(resname)
+    para_index, non_body_index, table_cell = _parse_resname(resname)
 
     trans_units.append({
         "id": tu_id,
@@ -231,20 +239,32 @@ def _process_trans_unit(
         "inline_elements": inline_elements,
         "para_index": para_index,
         "non_body_index": non_body_index,
+        "table_cell": table_cell,
     })
 
 
-def _parse_resname(resname: str | None) -> tuple[int | None, int | None]:
-    """Parse resname attribute for para_index or non_body_index.
+def _parse_resname(
+    resname: str | None,
+) -> tuple[int | None, int | None, tuple[int, int, int] | None]:
+    """Parse resname attribute for para_index, non_body_index or table_cell.
+
+    Recognises three resname forms:
+
+    * ``para_index_N`` → ``(N, None, None)``
+    * ``non_body_N`` → ``(None, N, None)``
+    * ``table_{t}_r{r}_c{c}`` → ``(None, None, (t, r, c))``
 
     Args:
         resname: The resname attribute value, or None.
 
     Returns:
-        Tuple of (para_index, non_body_index).
+        Tuple of (para_index, non_body_index, table_cell).  ``table_cell``
+        is a ``(t, r, c)`` tuple of ints or None.  A malformed ``table_...``
+        value yields None and never raises.
     """
     para_index = None
     non_body_index = None
+    table_cell = None
     if resname:
         if resname.startswith("para_index_"):
             try:
@@ -256,7 +276,15 @@ def _parse_resname(resname: str | None) -> tuple[int | None, int | None]:
                 non_body_index = int(resname[len("non_body_"):])
             except ValueError:
                 non_body_index = None
-    return para_index, non_body_index
+        elif resname.startswith("table_"):
+            match = _TABLE_RESNAME_RE.match(resname)
+            if match:
+                table_cell = (
+                    int(match.group(1)),
+                    int(match.group(2)),
+                    int(match.group(3)),
+                )
+    return para_index, non_body_index, table_cell
 
 
 def extract_inline_elements_from_xml(
