@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import posixpath
+import re
 import zipfile
 from pathlib import Path
 from typing import Any, Optional
@@ -32,6 +34,25 @@ A_PREFIX = f"{{{A_NS}}}"
 P_NS = "http://schemas.openxmlformats.org/presentationml/2006/main"
 P_PREFIX = f"{{{P_NS}}}"
 R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+
+# Open Packaging Conventions (OPC) relationships namespace and the two parts
+# that define slide order.  ``p:sldIdLst`` in presentation.xml lists slides in
+# presentation order; each ``p:sldId`` carries an unbraced ``r:id`` that must be
+# resolved through presentation.xml.rels to its slide part.
+_REL_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
+_PRESENTATION_PART = "ppt/presentation.xml"
+_PRESENTATION_RELS_PART = "ppt/_rels/presentation.xml.rels"
+_SLIDE_PREFIX = "ppt/slides/slide"
+_SLIDE_SUFFIX = ".xml"
+
+# Issue #58: OPP emits one trans-unit per PPTX table cell with resname
+# ``table_{t}_r{r}_c{c}`` (raw node indices: t = table index accumulated across
+# slides in sldIdLst order, r = direct ``a:tr`` index, c = direct ``a:tc``
+# index).  Deliberately DUPLICATED rather than imported: the twin lives in the
+# sibling channel ``xliff2docx/parser.py:31`` (and ``xliff2html/writer.py:318``
+# repeats it too), so importing across channels would invert the dependency
+# direction.  Keep the one-line pattern in sync with those twins.
+_TABLE_RESNAME_RE = re.compile(r"^table_(\d+)_r(\d+)_c(\d+)$")
 
 # XLIFF namespaces (multi-version support)
 XLIFF_NS_1_2 = "urn:oasis:names:tc:xliff:document:1.2"
@@ -253,6 +274,7 @@ class XLIFF2PPTXConverter(BaseConverter):
                 "source": source_text,
                 "target": target_text,
                 "inline_elements": inline_elements,
+                "resname": unit.get("resname"),
             })
         return units
 
@@ -263,6 +285,10 @@ class XLIFF2PPTXConverter(BaseConverter):
 
         Each <segment> inside a <unit> becomes one translation record. If a
         <unit> has no <segment>, the whole <unit> is treated as one record.
+
+        XLIFF 2.0 has no ``resname`` attribute, so positional ``table_*``
+        units are only produced for XLIFF 1.x; a 2.0 file always backfills
+        through the text-matching path.
 
         Args:
             root: Parsed XML root element.
@@ -363,9 +389,16 @@ class XLIFF2PPTXConverter(BaseConverter):
         """
         modified = dict(slide_files)
 
-        # Build a mapping from source text to target text
+        table_units: list[tuple[int, int, int, dict[str, object]]] = []
         trans_map: dict[str, Any] = {}
         for unit in xliff_data["units"]:
+            table_cell = self._parse_table_resname(unit.get("resname"))
+            if table_cell is not None:
+                # Trap #1: table units are applied ONLY positionally.  If they
+                # stayed in trans_map the text pass would write a cell target
+                # into any other run that happens to share the source text.
+                table_units.append((*table_cell, unit))
+                continue
             source = str(unit["source"])
             target = str(unit["target"])
             if source and target:
@@ -374,18 +407,209 @@ class XLIFF2PPTXConverter(BaseConverter):
                     "inline_elements": unit["inline_elements"],
                 }
 
-        for filename in modified:
-            if filename.startswith("ppt/slides/slide") and filename.endswith(".xml"):
-                xml_content = modified[filename].decode("utf-8")
-                root = etree.fromstring(xml_content.encode("utf-8"))
-                if self._apply_translation_to_slide_root(root, trans_map):
-                    modified[filename] = etree.tostring(
-                        root,
-                        encoding="utf-8",
-                        xml_declaration=True,
+        slide_roots: list[tuple[str, etree._Element]] = []
+        total_tables = 0
+        for filename in self._ordered_slide_filenames(modified):
+            if filename not in modified:
+                continue
+            if not (
+                filename.startswith(_SLIDE_PREFIX)
+                and filename.endswith(_SLIDE_SUFFIX)
+            ):
+                continue
+            root = etree.fromstring(modified[filename])
+            slide_roots.append((filename, root))
+            total_tables += len(list(root.iter(f"{A_PREFIX}tbl")))
+
+        if table_units:
+            for table_t, row, col, _unit in table_units:
+                if table_t >= total_tables:
+                    logger.warning(
+                        "resname table_%d_r%d_c%d out of range (have %d tables)",
+                        table_t, row, col, total_tables,
                     )
 
+        t_offset = 0
+        for filename, root in slide_roots:
+            n_tables = len(list(root.iter(f"{A_PREFIX}tbl")))
+            changed = self._apply_table_units_to_root(
+                root, table_units, t_offset, n_tables
+            )
+            if self._apply_translation_to_slide_root(root, trans_map):
+                changed = True
+            if changed:
+                modified[filename] = etree.tostring(
+                    root,
+                    encoding="utf-8",
+                    xml_declaration=True,
+                )
+            t_offset += n_tables
+
         return modified
+
+    def _ordered_slide_filenames(self, files: dict[str, bytes]) -> list[str]:
+        """Resolve slide part names into presentation order.
+
+        Reads ``p:sldIdLst`` in ``ppt/presentation.xml`` and resolves each
+        ``p:sldId`` ``r:id`` through ``ppt/_rels/presentation.xml.rels``, so the
+        global ``table_{t}`` accumulator matches OPP's ``enumerate(prs.slides)``
+        (a numeric filename sort would not: a valid pptx can list
+        ``slide10.xml`` before ``slide2.xml``, and ``sldIdLst`` order can itself
+        disagree with filename order).
+
+        Duplicate ``p:sldId`` entries are kept in order (a part referenced twice
+        is counted twice, matching OPP).  An unresolvable ``r:id`` warns and
+        consumes no table index.  Orphan slide parts not referenced by
+        ``sldIdLst`` are IGNORED - unlike the previous name-based iteration - so
+        OPP and ORF never disagree about which parts exist.
+        """
+        presentation = files.get(_PRESENTATION_PART)
+        rels = files.get(_PRESENTATION_RELS_PART)
+        if presentation is None or rels is None:
+            logger.warning(
+                "%s or %s missing; falling back to ZIP-name slide order",
+                _PRESENTATION_PART,
+                _PRESENTATION_RELS_PART,
+            )
+            return self._name_ordered_slide_filenames(files)
+
+        try:
+            pres_root = etree.fromstring(presentation)
+            rels_root = etree.fromstring(rels)
+        except etree.XMLSyntaxError as e:
+            logger.warning(
+                "Could not parse presentation.xml or its rels (%s); "
+                "falling back to ZIP-name slide order",
+                e,
+            )
+            return self._name_ordered_slide_filenames(files)
+
+        rid_to_target = {
+            rel.get("Id"): rel.get("Target")
+            for rel in rels_root.findall(f"{{{_REL_NS}}}Relationship")
+            if rel.get("Id") and rel.get("Target")
+        }
+
+        ordered: list[str] = []
+        for sld in pres_root.xpath(".//p:sldIdLst/p:sldId", namespaces={"p": P_NS}):
+            rid = sld.get(f"{{{R_NS}}}id")
+            target = rid_to_target.get(rid) if rid else None
+            if target is None:
+                logger.warning(
+                    "sldId r:id=%r has no resolvable relationship; skipping "
+                    "(no table index consumed)",
+                    rid,
+                )
+                continue
+            part = self._resolve_rels_target(target)
+            if part not in files:
+                logger.warning(
+                    "sldId r:id=%r resolves to missing part %r; skipping",
+                    rid,
+                    part,
+                )
+                continue
+            ordered.append(part)
+
+        if not ordered:
+            logger.warning(
+                "sldIdLst resolved no existing slide parts; falling back to "
+                "ZIP-name slide order",
+            )
+            return self._name_ordered_slide_filenames(files)
+        return ordered
+
+    def _name_ordered_slide_filenames(self, files: dict[str, bytes]) -> list[str]:
+        return [
+            name
+            for name in files
+            if name.startswith(_SLIDE_PREFIX) and name.endswith(_SLIDE_SUFFIX)
+        ]
+
+    def _resolve_rels_target(self, target: str) -> str:
+        if target.startswith("/"):
+            return posixpath.normpath(target.lstrip("/"))
+        return posixpath.normpath(posixpath.join("ppt", target))
+
+    def _parse_table_resname(self, resname: object) -> tuple[int, int, int] | None:
+        if not isinstance(resname, str):
+            return None
+        match = _TABLE_RESNAME_RE.match(resname)
+        if match is None:
+            return None
+        return int(match.group(1)), int(match.group(2)), int(match.group(3))
+
+    def _apply_table_units_to_root(
+        self,
+        root: etree._Element,
+        table_units: list[tuple[int, int, int, dict[str, object]]],
+        t_offset: int,
+        n_tables: int,
+    ) -> bool:
+        """Write positional table units belonging to one slide, in place.
+
+        Cells resolve by raw direct-child indices (``a:tbl`` -> ``a:tr`` ->
+        ``a:tc``), exactly as OPP numbers them.  The target is distributed
+        across the origin cell's own ``a:p``/``a:r`` runs; ``hMerge``/
+        ``vMerge`` covered siblings have no unit and are left untouched.
+        Out-of-range coordinates warn and skip.
+        """
+        tables = list(root.iter(f"{A_PREFIX}tbl"))
+        changed = False
+        for table_t, row, col, unit in table_units:
+            local = table_t - t_offset
+            if not (0 <= local < n_tables):
+                continue
+            rows = tables[local].findall(f"{A_PREFIX}tr")
+            if not (0 <= row < len(rows)):
+                logger.warning(
+                    "resname table_%d_r%d_c%d out of range (have %d rows)",
+                    table_t, row, col, len(rows),
+                )
+                continue
+            cells = rows[row].findall(f"{A_PREFIX}tc")
+            if not (0 <= col < len(cells)):
+                logger.warning(
+                    "resname table_%d_r%d_c%d out of range (have %d cells)",
+                    table_t, row, col, len(cells),
+                )
+                continue
+            text_elements: list[etree._Element] = []
+            for p in cells[col].iter(f"{A_PREFIX}p"):
+                for r_element in p.findall(f"{A_PREFIX}r"):
+                    text_elements.extend(r_element.findall(f"{A_PREFIX}t"))
+            if not text_elements:
+                logger.warning(
+                    "resname table_%d_r%d_c%d has no runs to backfill",
+                    table_t, row, col,
+                )
+                continue
+            self._distribute_text_across_pptx_runs(
+                text_elements, str(unit["target"])
+            )
+            changed = True
+        return changed
+
+    def _distribute_text_across_pptx_runs(
+        self,
+        text_elements: list[etree._Element],
+        target_text: str,
+    ) -> None:
+        """Distribute target_text across a cell's flat ``a:t`` list.
+
+        Mirrors ``xliff2docx.matcher._distribute_text_across_runs``: split on
+        newlines, one line per run; extra lines append to the last run; tail
+        runs are cleared so no source text is left behind.
+        """
+        lines = target_text.split("\n")
+        for i, line in enumerate(lines):
+            if i < len(text_elements):
+                text_elements[i].text = line
+            else:
+                last = text_elements[-1]
+                last.text = (last.text or "") + "\n" + line
+        for element in text_elements[len(lines):]:
+            element.text = ""
 
     def _apply_translation_to_slide_root(
         self,
