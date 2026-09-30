@@ -20,6 +20,15 @@ from ._ns import WORD_NS_MAP, W_NS, FUZZY_MATCH_THRESHOLD
 
 logger = get_logger("channel.xliff2docx.matcher")
 
+# ── OPP#80 Wave 1: paragraph-scoped table-cell write-back ──────────
+#
+# Dispositions assigned by ``build_table_cell_plan`` to every table-cell
+# trans-unit (CONTRACT.md §Table Cell Coordinates, v1.1):
+PROCESS_WHOLE_CELL = "process_whole_cell"
+PROCESS_PARAGRAPH = "process_paragraph"
+SKIP_BARE_IN_PARA_CELL = "skip_bare_in_para_cell"
+SKIP_DUPLICATE_PARA = "skip_duplicate_para"
+
 
 def _distribute_text_across_runs(runs: list, target_text: str) -> None:
     """Distribute target_text across runs, preserving newlines.
@@ -208,6 +217,105 @@ def backfill_by_non_body_position(
     return True
 
 
+def build_table_cell_plan(
+    trans_units: list[dict[str, Any]],
+) -> dict[int, str]:
+    """Classify every table-cell trans-unit for paragraph-scoped backfill.
+
+    Contract (CONTRACT.md §Table Cell Coordinates, v1.1):
+
+    * A cell carrying at least one ``_para{p}`` unit is PER-PARAGRAPH. Inside
+      such a cell a bare ``table_..._c{c}`` unit is skipped
+      (``SKIP_BARE_IN_PARA_CELL``) — a whole-cell write would clear the
+      per-paragraph writes. The first occurrence of each ``(t, r, c, para)``
+      key is written (``PROCESS_PARAGRAPH``); later duplicates are skipped
+      (``SKIP_DUPLICATE_PARA``).
+    * A cell carrying only bare units is WHOLE-CELL and keeps legacy behavior
+      (``PROCESS_WHOLE_CELL``), duplicate bare units included.
+    * Out-of-range paragraphs are NOT filtered here; the writer warns and
+      returns False so the caller never guesses a paragraph.
+
+    Returns:
+        ``{unit_index: disposition}`` for every table-cell unit, keyed by
+        the unit's 0-based position in ``trans_units``. Non-table units are
+        absent. Pure — ``trans_units`` is never mutated.
+    """
+    cell_is_per_para: dict[tuple[int, int, int], bool] = {}
+    for tu in trans_units:
+        table_cell = tu.get("table_cell")
+        if table_cell is None:
+            continue
+        t, r, c, para = table_cell
+        if para is not None:
+            cell_is_per_para[(t, r, c)] = True
+        elif (t, r, c) not in cell_is_per_para:
+            cell_is_per_para[(t, r, c)] = False
+
+    plan: dict[int, str] = {}
+    seen_para_keys: set[tuple[int, int, int, int]] = set()
+    for unit_pos, tu in enumerate(trans_units):
+        table_cell = tu.get("table_cell")
+        if table_cell is None:
+            continue
+        t, r, c, para = table_cell
+        if not cell_is_per_para[(t, r, c)]:
+            plan[unit_pos] = PROCESS_WHOLE_CELL
+            continue
+        if para is None:
+            plan[unit_pos] = SKIP_BARE_IN_PARA_CELL
+            continue
+        para_key = (t, r, c, para)
+        if para_key in seen_para_keys:
+            plan[unit_pos] = SKIP_DUPLICATE_PARA
+            continue
+        seen_para_keys.add(para_key)
+        plan[unit_pos] = PROCESS_PARAGRAPH
+    return plan
+
+
+def _write_runs_in_paragraph(
+    runs: list[etree._Element],
+    target_text: str,
+    build_formatted_runs_fn: Any,
+    strip_inline_tags_fn: Any,
+) -> None:
+    """Write ``target_text`` into the runs of exactly one paragraph.
+
+    Paragraph-scoped twin of the ``bx``/``ex`` branch in
+    ``backfill_by_table_cell``. ``runs`` holds only one paragraph's ``w:t``
+    elements, so inserting formatted runs and clearing tail runs can never
+    reach a sibling paragraph of the cell.
+    """
+    formatted_runs = build_formatted_runs_fn(target_text)
+    has_real_inline_tags = bool(
+        re.search(
+            r"<\s*/?\s*bx\b|<\s*/?\s*ex\b",
+            target_text,
+        )
+    )
+    if formatted_runs and has_real_inline_tags:
+        target_run = runs[0]
+        parent = target_run.getparent()
+        if parent is not None:
+            parent_para = parent.getparent()
+            if parent_para is not None:
+                for i, fr in enumerate(formatted_runs):
+                    parent_para.insert(
+                        list(parent_para).index(parent) + i,
+                        fr,
+                    )
+                target_run.text = ""
+                for r in runs[1:]:
+                    r.text = ""
+                return
+            target_run.text = strip_inline_tags_fn(target_text)
+            for r in runs[1:]:
+                r.text = ""
+            return
+
+    _distribute_text_across_runs(runs, target_text)
+
+
 def backfill_by_table_cell(
     root: etree._Element,
     table_index: int,
@@ -216,6 +324,7 @@ def backfill_by_table_cell(
     target_text: str,
     build_formatted_runs_fn: Any,
     strip_inline_tags_fn: Any,
+    para: int | None = None,
 ) -> bool:
     """Issue A: apply target_text to the cell at ``(table_index, row, col)``.
 
@@ -226,10 +335,20 @@ def backfill_by_table_cell(
     * its direct ``./w:tr`` children → the ``row``-th
     * its direct ``./w:tc`` children → the ``col``-th
 
-    Only the cell's direct paragraphs are considered (``./w:p``); nested
-    tables inside the cell are never descended into.  Inline ``<bx>``/``<ex>``
-    tags are honoured via ``build_formatted_runs_fn`` and newlines are
-    distributed across runs exactly like ``_distribute_text_across_runs``.
+    Inline ``<bx>``/``<ex>`` tags are honoured via ``build_formatted_runs_fn``
+    and newlines are distributed across runs exactly like
+    ``_distribute_text_across_runs``.
+
+    ``para`` selects the write scope (OPP#80 Wave 1, CONTRACT.md §Table Cell
+    Coordinates):
+
+    * ``None`` — legacy WHOLE-CELL write-back: every direct ``w:p`` of the
+      cell is flattened into one run list. Byte-for-byte unchanged.
+    * ``int`` — paragraph-scoped write-back: only ``paras[para]`` (the
+      ``para``-th direct ``w:p`` child, empty paragraphs included) is
+      touched; every sibling paragraph is left untouched. An out-of-range
+      ``para`` or a paragraph with no runs warns and returns False — it is
+      never silently widened back to the whole cell.
 
     Returns False (with a warning) when the table, row, cell or its runs
     are missing.
@@ -260,6 +379,31 @@ def backfill_by_table_cell(
         )
         return False
     tc = cells[col]
+
+    if para is not None:
+        # Direct ``w:p`` children in document order — the same enumeration
+        # OPP used to number ``_para{p}`` (raw children, empty paragraphs
+        # included). ``tc.findall`` never descends into a nested table.
+        paras = tc.findall(f"{{{W_NS}}}p")
+        if not (0 <= para < len(paras)):
+            logger.warning(
+                "resname table_%d_r%d_c%d_para%d out of range (have %d paras)",
+                table_index, row, col, para, len(paras),
+            )
+            return False
+        target_para = paras[para]
+        para_runs = target_para.xpath("./w:r/w:t", namespaces=WORD_NS_MAP)
+        if not para_runs:
+            logger.warning(
+                "resname table_%d_r%d_c%d_para%d has no runs to backfill",
+                table_index, row, col, para,
+            )
+            return False
+        _write_runs_in_paragraph(
+            para_runs, target_text,
+            build_formatted_runs_fn, strip_inline_tags_fn,
+        )
+        return True
 
     # Direct paragraphs of the cell only — do NOT descend into a nested tbl.
     runs: list[etree._Element] = []
