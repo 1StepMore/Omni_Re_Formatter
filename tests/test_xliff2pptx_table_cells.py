@@ -10,6 +10,7 @@ for the ``t`` accumulator.  These tests pin the positional write-back, the
 
 from __future__ import annotations
 
+import logging
 import zipfile
 from pathlib import Path
 from unittest.mock import patch
@@ -70,10 +71,15 @@ def _plain_unit(uid: str, source: str, target: str) -> str:
 
 
 def _table_cell_xml(value: object) -> str:
-    """One a:tc; a list value becomes one paragraph per item."""
+    """One a:tc; a list value becomes one paragraph per item.
+
+    A ``None`` item becomes an empty ``<a:p/>`` (a paragraph with zero runs),
+    so a test can pin the zero-run skip path.
+    """
     paras = value if isinstance(value, list) else [value]
     body = "".join(
-        f"<a:p><a:r><a:t>{para}</a:t></a:r></a:p>" for para in paras
+        "<a:p/>" if para is None else f"<a:p><a:r><a:t>{para}</a:t></a:r></a:p>"
+        for para in paras
     )
     return f"<a:tc><a:txBody>{body}</a:txBody></a:tc>"
 
@@ -227,6 +233,16 @@ def _run_texts(root: etree._Element) -> list[str]:
     return [
         "".join(el.text or "" for el in run.iter(f"{A}t"))
         for run in root.iter(f"{A}r")
+    ]
+
+
+def _paragraph_texts(root: etree._Element) -> list[str]:
+    """Per-``a:p`` concatenated text of the first ``a:tc``, in document order."""
+    tc = root.find(f".//{A}tc")
+    assert tc is not None, "fixture must contain a table cell"
+    return [
+        "".join(el.text or "" for el in p.iter(f"{A}t"))
+        for p in tc.iter(f"{A}p")
     ]
 
 
@@ -397,6 +413,118 @@ class TestPositionalTableCellBackfill:
         ]
         assert "".join(cell_t) == "翻译"
         assert cell_t[1:] == [""] * (len(cell_t) - 1), "tail runs must be cleared"
+
+
+class TestParagraphScopedTableCellBackfill:
+    """OPP#80 Wave 1: a ``_para{p}`` unit writes ONE paragraph, not the whole cell."""
+
+    def test_para_unit_writes_only_target_paragraph(self, tmp_path: Path):
+        skeleton = _build_deck(
+            tmp_path / "deck.pptx",
+            [{"tables": [(1, 1, {(0, 0): ["Source A", "Source B"]})]}],
+        )
+        xliff = _xliff("\n".join([
+            _unit("1", "table_0_r0_c0_para0", "Source A", "译A"),
+            _unit("2", "table_0_r0_c0_para1", "Source B", "译B"),
+        ]))
+        output, _ = _convert(skeleton, tmp_path, xliff)
+
+        assert _paragraph_texts(
+            _read_slide(output, "ppt/slides/slide1.xml")
+        ) == ["译A", "译B"]
+
+    def test_para_unit_leaves_sibling_paragraph_untouched(self, tmp_path: Path):
+        skeleton = _build_deck(
+            tmp_path / "deck.pptx",
+            [{"tables": [(1, 1, {(0, 0): ["Orig 0", "Orig 1", "Orig 2"]})]}],
+        )
+        xliff = _xliff(_unit("1", "table_0_r0_c0_para1", "Orig 1", "New 1"))
+        output, _ = _convert(skeleton, tmp_path, xliff)
+
+        assert _paragraph_texts(
+            _read_slide(output, "ppt/slides/slide1.xml")
+        ) == ["Orig 0", "New 1", "Orig 2"]
+
+    def test_para_out_of_range_skips_and_warns(self, tmp_path: Path, caplog):
+        skeleton = _build_deck(
+            tmp_path / "deck.pptx",
+            [{"tables": [(1, 1, {(0, 0): ["A", "B"]})]}],
+        )
+        xliff = _xliff(_unit("1", "table_0_r0_c0_para9", "A", "T"))
+        with caplog.at_level(logging.WARNING):
+            output, _ = _convert(skeleton, tmp_path, xliff)
+
+        assert "out of range" in caplog.text
+        assert _paragraph_texts(
+            _read_slide(output, "ppt/slides/slide1.xml")
+        ) == ["A", "B"]
+
+    def test_para_duplicate_keeps_first_and_warns(self, tmp_path: Path, caplog):
+        skeleton = _build_deck(
+            tmp_path / "deck.pptx",
+            [{"tables": [(1, 1, {(0, 0): ["A", "B"]})]}],
+        )
+        xliff = _xliff("\n".join([
+            _unit("1", "table_0_r0_c0_para0", "A", "First"),
+            _unit("2", "table_0_r0_c0_para0", "A", "Second"),
+        ]))
+        with caplog.at_level(logging.WARNING):
+            output, _ = _convert(skeleton, tmp_path, xliff)
+
+        assert "duplicated" in caplog.text
+        assert _paragraph_texts(
+            _read_slide(output, "ppt/slides/slide1.xml")
+        ) == ["First", "B"]
+
+    def test_mixed_bare_and_para_never_falls_back_to_whole_cell(
+        self, tmp_path: Path, caplog
+    ):
+        # Anti-corruption: the bare unit must be SKIPPED, never written
+        # whole-cell, or it would clear the per-paragraph write and destroy
+        # the sibling paragraph "Orig B".
+        skeleton = _build_deck(
+            tmp_path / "deck.pptx",
+            [{"tables": [(1, 1, {(0, 0): ["Orig A", "Orig B"]})]}],
+        )
+        xliff = _xliff("\n".join([
+            _unit("1", "table_0_r0_c0", "Orig A\nOrig B", "WHOLE-CELL"),
+            _unit("2", "table_0_r0_c0_para0", "Orig A", "PARA-A"),
+        ]))
+        with caplog.at_level(logging.WARNING):
+            output, _ = _convert(skeleton, tmp_path, xliff)
+
+        root = _read_slide(output, "ppt/slides/slide1.xml")
+        assert _paragraph_texts(root) == ["PARA-A", "Orig B"]
+        assert "WHOLE-CELL" not in "".join(_run_texts(root))
+        assert "mixes bare" in caplog.text
+
+    def test_bare_resname_unchanged_regression(self, tmp_path: Path):
+        # Bare-only multi-paragraph cell keeps the legacy whole-cell flatten:
+        # line i lands on flattened run i.
+        skeleton = _build_deck(
+            tmp_path / "deck.pptx",
+            [{"tables": [(1, 1, {(0, 0): ["Hello", "World"]})]}],
+        )
+        xliff = _xliff(_unit("1", "table_0_r0_c0", "Hello\nWorld", "你好\n世界"))
+        output, _ = _convert(skeleton, tmp_path, xliff)
+
+        assert _paragraph_texts(
+            _read_slide(output, "ppt/slides/slide1.xml")
+        ) == ["你好", "世界"]
+
+    def test_para_zero_run_paragraph_skips_and_warns(self, tmp_path: Path, caplog):
+        skeleton = _build_deck(
+            tmp_path / "deck.pptx",
+            [{"tables": [(1, 1, {(0, 0): ["A", None]})]}],
+        )
+        xliff = _xliff(_unit("1", "table_0_r0_c0_para1", "x", "T"))
+        with caplog.at_level(logging.WARNING):
+            output, _ = _convert(skeleton, tmp_path, xliff)
+
+        assert "no runs" in caplog.text
+        assert _paragraph_texts(
+            _read_slide(output, "ppt/slides/slide1.xml")
+        ) == ["A", ""]
 
 
 class TestTextPathFallback:
