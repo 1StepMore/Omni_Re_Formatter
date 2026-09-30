@@ -2,7 +2,7 @@
 
 ORF is the final step in the Omni document localization ecosystem, responsible for converting standardized intermediate representations back into complex target formats.
 
-[![Test status](https://img.shields.io/badge/Test%20status-local%20(see%20below)-lightgrey.svg)](#test-status)
+[![Test status](https://github.com/1StepMore/Omni_Re_Formatter/actions/workflows/test.yml/badge.svg)](https://github.com/1StepMore/Omni_Re_Formatter/actions/workflows/test.yml)
 
 ## Core Features
 
@@ -14,13 +14,12 @@ ORF is the final step in the Omni document localization ecosystem, responsible f
 
 ### Test status
 
-[![Test status](https://img.shields.io/badge/Test%20status-local%20(see%20below)-lightgrey.svg)](#test-status)
+[![Test status](https://github.com/1StepMore/Omni_Re_Formatter/actions/workflows/test.yml/badge.svg)](https://github.com/1StepMore/Omni_Re_Formatter/actions/workflows/test.yml)
 
-Test status is **local-only** — CI is suspended while the upstream
-[1StepMore](https://github.com/1StepMore) origin account is restricted, and the
-`renanzai40` backup mirrors do not run GitHub Actions. The workflows that exist
-in this repo (`.github/workflows/test.yml`, `.github/workflows/release.yml`)
-are not triggered during the suspension.
+CI runs on the upstream [1StepMore](https://github.com/1StepMore) repo and is
+currently green, driven by `.github/workflows/test.yml` (tests) and
+`.github/workflows/release.yml` (release). The `renanzai40` backup mirrors still
+do not run GitHub Actions, so this badge reflects the upstream repo only.
 
 Run the tests locally (from this repo):
 
