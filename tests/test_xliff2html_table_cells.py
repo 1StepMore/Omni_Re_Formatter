@@ -13,7 +13,7 @@ from pathlib import Path
 from lxml import html as lxml_html
 
 from orf.channels.xliff2html import XLIFF2HTMLConverter
-from orf.channels.xliff2html.writer import backfill_table_cells
+from orf.channels.xliff2html.writer import _TABLE_RESNAME_RE, backfill_table_cells
 from orf.converters.options import ConverterOptions
 
 
@@ -128,4 +128,33 @@ class TestBackfillTableCellsDirect:
         # Translator's value with leftover XLIFF inline markup.
         translations = {"1": '<bx id="1"/>甲<ex id="1"/>'}
         assert backfill_table_cells(root, translations, xliff) == 1
+        assert _cell_texts(str(lxml_html.tostring(root, encoding="unicode")))[0] == "甲"
+
+
+class TestTableResnameGrammar:
+    """The optional ``_para{p}`` group parses (OPP#80 Wave 0B)."""
+
+    def test_bare_resname_has_no_para_group(self):
+        match = _TABLE_RESNAME_RE.match("table_0_r0_c0")
+        assert match is not None
+        assert match.group(1, 2, 3, 4) == ("0", "0", "0", None)
+
+    def test_para_resname_parses_para_group(self):
+        match0 = _TABLE_RESNAME_RE.match("table_0_r0_c0_para0")
+        assert match0 is not None
+        assert match0.group(1, 2, 3, 4) == ("0", "0", "0", "0")
+
+        match12 = _TABLE_RESNAME_RE.match("table_0_r0_c0_para12")
+        assert match12 is not None
+        assert match12.group(1, 2, 3, 4) == ("0", "0", "0", "12")
+
+    def test_malformed_para_resname_does_not_match(self):
+        assert _TABLE_RESNAME_RE.match("table_0_r0_c0_paraX") is None
+
+    def test_para_resname_still_writes_positional_cell(self):
+        # Reaching written == 1 proves the inline 4-group unpack and the
+        # ``int(para_str)`` conversion executed without raising.
+        root = lxml_html.fromstring(HTML_TEMPLATE)
+        xliff = _xliff(_unit("1", "table_0_r0_c0_para0", "IP67", "甲"))
+        assert backfill_table_cells(root, {"1": "甲"}, xliff) == 1
         assert _cell_texts(str(lxml_html.tostring(root, encoding="unicode")))[0] == "甲"

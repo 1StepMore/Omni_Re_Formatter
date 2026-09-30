@@ -278,11 +278,19 @@ def _convert(skeleton: Path, tmp_path: Path, xliff_content: str) -> tuple[Path, 
 class TestParseTableResname:
     def test_table_resname_parsed(self):
         converter = XLIFF2PPTXConverter()
-        assert converter._parse_table_resname("table_0_r1_c2") == (0, 1, 2)
+        assert converter._parse_table_resname("table_0_r1_c2") == (0, 1, 2, None)
+
+    def test_table_resname_with_para_parsed(self):
+        converter = XLIFF2PPTXConverter()
+        assert converter._parse_table_resname("table_0_r0_c0_para0") == (0, 0, 0, 0)
+        assert converter._parse_table_resname("table_0_r0_c0_para12") == (
+            0, 0, 0, 12,
+        )
 
     def test_malformed_table_resname_is_none(self):
         converter = XLIFF2PPTXConverter()
         assert converter._parse_table_resname("table_x_r1_c0") is None
+        assert converter._parse_table_resname("table_0_r0_c0_paraX") is None
 
     def test_non_table_resname_is_none(self):
         converter = XLIFF2PPTXConverter()

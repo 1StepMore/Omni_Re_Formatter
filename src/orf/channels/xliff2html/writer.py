@@ -315,7 +315,12 @@ def backfill_by_text_match(
     return replaced
 
 
-_TABLE_RESNAME_RE = re.compile(r"^table_(\d+)_r(\d+)_c(\d+)$")
+# Issue A: OPP emits ``table_{t}_r{r}_c{c}`` resnames.  OPP#80 Wave 0B adds an
+# optional ``_para{p}`` suffix (0-based cell paragraph index); the group is
+# OPTIONAL so a bare resname still matches with group(4) == None.  Deliberately
+# duplicated in the sibling channels (xliff2docx/parser.py:31,
+# xliff2pptx.py:55); keep in sync.
+_TABLE_RESNAME_RE = re.compile(r"^table_(\d+)_r(\d+)_c(\d+)(?:_para(\d+))?$")
 _TABLE_TRANS_UNIT_RE = re.compile(
     r"<trans-unit\b([^>]*)>(.*?)</trans-unit>", re.DOTALL | re.IGNORECASE
 )
@@ -364,11 +369,14 @@ def backfill_table_cells(
         if unit_id is None or unit_id not in translations:
             continue
 
-        table_index, row_index, col_index = (
+        table_index, row_index, col_index, para_str = (
             int(coord_match.group(1)),
             int(coord_match.group(2)),
             int(coord_match.group(3)),
+            coord_match.group(4),
         )
+        # Carried for the Wave-1 per-paragraph write-back; unused in this wave.
+        _para = int(para_str) if para_str is not None else None
         try:
             if not (0 <= table_index < len(tables)):
                 logger.debug("table_%s: table out of range", resname)

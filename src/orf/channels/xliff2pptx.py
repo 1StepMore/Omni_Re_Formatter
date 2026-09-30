@@ -48,11 +48,15 @@ _SLIDE_SUFFIX = ".xml"
 # Issue #58: OPP emits one trans-unit per PPTX table cell with resname
 # ``table_{t}_r{r}_c{c}`` (raw node indices: t = table index accumulated across
 # slides in sldIdLst order, r = direct ``a:tr`` index, c = direct ``a:tc``
-# index).  Deliberately DUPLICATED rather than imported: the twin lives in the
-# sibling channel ``xliff2docx/parser.py:31`` (and ``xliff2html/writer.py:318``
-# repeats it too), so importing across channels would invert the dependency
-# direction.  Keep the one-line pattern in sync with those twins.
-_TABLE_RESNAME_RE = re.compile(r"^table_(\d+)_r(\d+)_c(\d+)$")
+# index).  OPP#80 Wave 0B: a future OPP release may add an optional
+# ``_para{p}`` suffix (0-based paragraph index within the cell); the group is
+# OPTIONAL so a bare ``table_{t}_r{r}_c{c}`` still matches with group(4) ==
+# None and takes the exact same code path as before.  Deliberately DUPLICATED
+# rather than imported: the twin lives in the sibling channel
+# ``xliff2docx/parser.py:31`` (and ``xliff2html/writer.py:318`` repeats it
+# too), so importing across channels would invert the dependency direction.
+# Keep the one-line pattern in sync with those twins.
+_TABLE_RESNAME_RE = re.compile(r"^table_(\d+)_r(\d+)_c(\d+)(?:_para(\d+))?$")
 
 # XLIFF namespaces (multi-version support)
 XLIFF_NS_1_2 = "urn:oasis:names:tc:xliff:document:1.2"
@@ -389,7 +393,7 @@ class XLIFF2PPTXConverter(BaseConverter):
         """
         modified = dict(slide_files)
 
-        table_units: list[tuple[int, int, int, dict[str, object]]] = []
+        table_units: list[tuple[int, int, int, int | None, dict[str, object]]] = []
         trans_map: dict[str, Any] = {}
         for unit in xliff_data["units"]:
             table_cell = self._parse_table_resname(unit.get("resname"))
@@ -422,7 +426,7 @@ class XLIFF2PPTXConverter(BaseConverter):
             total_tables += len(list(root.iter(f"{A_PREFIX}tbl")))
 
         if table_units:
-            for table_t, row, col, _unit in table_units:
+            for table_t, row, col, _para, _unit in table_units:
                 if table_t >= total_tables:
                     logger.warning(
                         "resname table_%d_r%d_c%d out of range (have %d tables)",
@@ -531,18 +535,26 @@ class XLIFF2PPTXConverter(BaseConverter):
             return posixpath.normpath(target.lstrip("/"))
         return posixpath.normpath(posixpath.join("ppt", target))
 
-    def _parse_table_resname(self, resname: object) -> tuple[int, int, int] | None:
+    def _parse_table_resname(
+        self, resname: object
+    ) -> tuple[int, int, int, int | None] | None:
         if not isinstance(resname, str):
             return None
         match = _TABLE_RESNAME_RE.match(resname)
         if match is None:
             return None
-        return int(match.group(1)), int(match.group(2)), int(match.group(3))
+        para_str = match.group(4)
+        return (
+            int(match.group(1)),
+            int(match.group(2)),
+            int(match.group(3)),
+            int(para_str) if para_str is not None else None,
+        )
 
     def _apply_table_units_to_root(
         self,
         root: etree._Element,
-        table_units: list[tuple[int, int, int, dict[str, object]]],
+        table_units: list[tuple[int, int, int, int | None, dict[str, object]]],
         t_offset: int,
         n_tables: int,
     ) -> bool:
@@ -556,7 +568,7 @@ class XLIFF2PPTXConverter(BaseConverter):
         """
         tables = list(root.iter(f"{A_PREFIX}tbl"))
         changed = False
-        for table_t, row, col, unit in table_units:
+        for table_t, row, col, _para, unit in table_units:
             local = table_t - t_offset
             if not (0 <= local < n_tables):
                 continue

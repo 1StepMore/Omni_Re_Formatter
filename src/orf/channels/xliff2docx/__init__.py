@@ -732,14 +732,17 @@ class XLIFF2DOCXConverter(BaseConverter):
                         )
 
                 # Issue A: table_{t}_r{r}_c{c} positional lookup
+                # (OPP#80 Wave 0B: table_cell carries a 4th ``para`` element;
+                # not consumed until the Wave-1 per-paragraph write-back).
                 table_cell = tu.get("table_cell")
                 if table_cell is not None:
+                    table_index, row, col, _para = table_cell
                     try:
                         cell_applied = self._backfill_by_table_cell(
                             root,
-                            table_cell[0],
-                            table_cell[1],
-                            table_cell[2],
+                            table_index,
+                            row,
+                            col,
                             target_text,
                         )
                     except Exception as e:

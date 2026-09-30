@@ -123,10 +123,19 @@ class TestParseResname:
     """The resname parser must return the 3-tuple and never raise."""
 
     def test_table_resname_parsed(self):
-        assert _parse_resname("table_0_r1_c2") == (None, None, (0, 1, 2))
+        assert _parse_resname("table_0_r1_c2") == (None, None, (0, 1, 2, None))
+
+    def test_table_resname_with_para_parsed(self):
+        assert _parse_resname("table_0_r0_c0_para0") == (
+            None, None, (0, 0, 0, 0),
+        )
+        assert _parse_resname("table_0_r0_c0_para12") == (
+            None, None, (0, 0, 0, 12),
+        )
 
     def test_malformed_table_resname_is_none(self):
         assert _parse_resname("table_x_r1_c0") == (None, None, None)
+        assert _parse_resname("table_0_r0_c0_paraX") == (None, None, None)
 
     def test_para_index_unchanged(self):
         assert _parse_resname("para_index_3") == (3, None, None)
