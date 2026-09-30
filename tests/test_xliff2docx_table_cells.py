@@ -9,6 +9,7 @@ write-back and the resname parser contract.
 
 from __future__ import annotations
 
+import logging
 import zipfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -16,6 +17,7 @@ from unittest.mock import MagicMock, patch
 from lxml import etree
 
 from orf.channels.xliff2docx import XLIFF2DOCXConverter
+from orf.channels.xliff2docx.matcher import backfill_by_table_cell
 from orf.channels.xliff2docx.parser import _parse_resname
 
 W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
@@ -119,14 +121,44 @@ def _cell_text(tc: etree._Element) -> str:
     return "".join(t.text or "" for t in tc.iter(f"{{{W_NS}}}t"))
 
 
+def _multi_paragraph_cell(paragraphs: list[str]) -> str:
+    """A ``w:tc`` whose direct children are one ``w:p`` per string."""
+    inner = "".join(
+        f'<w:p><w:r><w:t xml:space="preserve">{p}</w:t></w:r></w:p>'
+        for p in paragraphs
+    )
+    return f"<w:tc>{inner}</w:tc>"
+
+
+def _paragraph_texts(tc: etree._Element) -> list[str]:
+    """One text entry per DIRECT ``w:p`` child of the cell."""
+    return [
+        "".join(t.text or "" for t in p.xpath(".//w:t", namespaces={"w": W_NS}))
+        for p in tc.findall(f"{{{W_NS}}}p")
+    ]
+
+
+def _table_with_cell(cell_xml: str) -> str:
+    return "<w:tbl><w:tr>" + cell_xml + "</w:tr></w:tbl>"
+
+
 class TestParseResname:
     """The resname parser must return the 3-tuple and never raise."""
 
     def test_table_resname_parsed(self):
-        assert _parse_resname("table_0_r1_c2") == (None, None, (0, 1, 2))
+        assert _parse_resname("table_0_r1_c2") == (None, None, (0, 1, 2, None))
+
+    def test_table_resname_with_para_parsed(self):
+        assert _parse_resname("table_0_r0_c0_para0") == (
+            None, None, (0, 0, 0, 0),
+        )
+        assert _parse_resname("table_0_r0_c0_para12") == (
+            None, None, (0, 0, 0, 12),
+        )
 
     def test_malformed_table_resname_is_none(self):
         assert _parse_resname("table_x_r1_c0") == (None, None, None)
+        assert _parse_resname("table_0_r0_c0_paraX") == (None, None, None)
 
     def test_para_index_unchanged(self):
         assert _parse_resname("para_index_3") == (3, None, None)
@@ -208,3 +240,124 @@ class TestNestedTableNotDescended:
 
         nested_text = "".join(t.text or "" for t in nested.iter(f"{{{W_NS}}}t"))
         assert nested_text == "NESTED"
+
+
+class TestParagraphScopedTableCellBackfill:
+    """OPP#80 Wave 1: ``_para{p}`` units write exactly one cell paragraph."""
+
+    def test_para_unit_writes_only_target_paragraph(self, tmp_path: Path):
+        body = _table_with_cell(_multi_paragraph_cell(["Yes", "tail"]))
+        xliff = _xliff(
+            "\n".join(
+                [
+                    _unit("1", "table_0_r0_c0_para0", "Yes", "ZH-YES"),
+                    _unit("2", "table_0_r0_c0_para1", "tail", "ZH-TAIL"),
+                ]
+            )
+        )
+        root = _run_docx_backfill(tmp_path, _document_xml(body), xliff)
+        assert _paragraph_texts(_cells(root)[(0, 0, 0)]) == ["ZH-YES", "ZH-TAIL"]
+
+    def test_para_unit_leaves_sibling_paragraph_untouched(self, tmp_path: Path):
+        body = _table_with_cell(_multi_paragraph_cell(["A", "B", "C"]))
+        xliff = _xliff(_unit("1", "table_0_r0_c0_para1", "B", "ZH-B"))
+        root = _run_docx_backfill(tmp_path, _document_xml(body), xliff)
+        assert _paragraph_texts(_cells(root)[(0, 0, 0)]) == ["A", "ZH-B", "C"]
+
+    def test_para_out_of_range_skips_and_warns(self, tmp_path: Path, caplog):
+        body = _table_with_cell(_multi_paragraph_cell(["Yes", "tail"]))
+        doc = _document_xml(body)
+
+        direct_root = etree.fromstring(doc.encode("utf-8"))
+        with caplog.at_level(logging.WARNING):
+            applied = backfill_by_table_cell(
+                direct_root, 0, 0, 0, "ZH-X",
+                lambda _t: [], lambda t: t, 9,
+            )
+        assert applied is False
+        assert _paragraph_texts(_cells(direct_root)[(0, 0, 0)]) == ["Yes", "tail"]
+        assert any("out of range" in r.getMessage() for r in caplog.records)
+
+        caplog.clear()
+        xliff = _xliff(_unit("1", "table_0_r0_c0_para9", "Yes", "ZH-X"))
+        with caplog.at_level(logging.WARNING):
+            root = _run_docx_backfill(tmp_path, doc, xliff)
+        assert _paragraph_texts(_cells(root)[(0, 0, 0)]) == ["Yes", "tail"]
+        assert any("out of range" in r.getMessage() for r in caplog.records)
+
+    def test_para_duplicate_keeps_first_and_warns(self, tmp_path: Path, caplog):
+        body = _table_with_cell(_multi_paragraph_cell(["A", "B"]))
+        xliff = _xliff(
+            "\n".join(
+                [
+                    _unit("1", "table_0_r0_c0_para0", "A", "FIRST"),
+                    _unit("2", "table_0_r0_c0_para0", "A", "SECOND"),
+                ]
+            )
+        )
+        with caplog.at_level(logging.WARNING):
+            root = _run_docx_backfill(tmp_path, _document_xml(body), xliff)
+        paragraphs = _paragraph_texts(_cells(root)[(0, 0, 0)])
+        assert paragraphs[0] == "FIRST"
+        assert "SECOND" not in "".join(paragraphs)
+        assert any("duplicate" in r.getMessage().lower() for r in caplog.records)
+
+    def test_mixed_bare_and_para_never_falls_back_to_whole_cell(
+        self, tmp_path: Path, caplog
+    ):
+        body = _table_with_cell(_multi_paragraph_cell(["A", "B", "C"]))
+        xliff = _xliff(
+            "\n".join(
+                [
+                    _unit("1", "table_0_r0_c0", "ABC", "ZH-WHOLE"),
+                    _unit("2", "table_0_r0_c0_para1", "B", "ZH-B"),
+                ]
+            )
+        )
+        with caplog.at_level(logging.WARNING):
+            root = _run_docx_backfill(tmp_path, _document_xml(body), xliff)
+        paragraphs = _paragraph_texts(_cells(root)[(0, 0, 0)])
+        assert paragraphs == ["A", "ZH-B", "C"]
+        assert "ZH-WHOLE" not in "".join(paragraphs)
+        assert any("bare" in r.getMessage().lower() for r in caplog.records)
+
+    def test_bare_resname_unchanged_regression(self, tmp_path: Path):
+        body = _table_with_cell(_multi_paragraph_cell(["A", "B"]))
+        xliff = _xliff(_unit("1", "table_0_r0_c0", "A\nB", "ZH-WHOLE"))
+        root = _run_docx_backfill(tmp_path, _document_xml(body), xliff)
+        # Legacy whole-cell: run 0 gets the target, the tail run is cleared.
+        assert _paragraph_texts(_cells(root)[(0, 0, 0)]) == ["ZH-WHOLE", ""]
+
+    def test_para_on_runless_paragraph_skips_and_warns(
+        self, tmp_path: Path, caplog
+    ):
+        runless_cell = (
+            "<w:tc>"
+            '<w:p><w:r><w:t xml:space="preserve">A</w:t></w:r></w:p>'
+            "<w:p><w:r><w:rPr/></w:r></w:p>"
+            "</w:tc>"
+        )
+        body = _table_with_cell(runless_cell)
+        xliff = _xliff(_unit("1", "table_0_r0_c0_para1", "q", "ZH"))
+        with caplog.at_level(logging.WARNING):
+            root = _run_docx_backfill(tmp_path, _document_xml(body), xliff)
+        assert _paragraph_texts(_cells(root)[(0, 0, 0)]) == ["A", ""]
+        assert any("no runs" in r.getMessage() for r in caplog.records)
+
+    def test_para_bx_ex_formats_target_paragraph_only(self):
+        body = _table_with_cell(_multi_paragraph_cell(["A", "B", "C"]))
+        root = etree.fromstring(_document_xml(body).encode("utf-8"))
+
+        formatted = etree.Element(f"{{{W_NS}}}r")
+        etree.SubElement(formatted, f"{{{W_NS}}}t").text = "FMT"
+
+        applied = backfill_by_table_cell(
+            root, 0, 0, 0, '<bx id="1"/>B<ex id="1"/>',
+            lambda _t: [formatted], lambda t: t, 1,
+        )
+
+        assert applied is True
+        paras = _cells(root)[(0, 0, 0)].findall(f"{{{W_NS}}}p")
+        assert [t.text for t in paras[0].iter(f"{{{W_NS}}}t")] == ["A"]
+        assert [t.text for t in paras[2].iter(f"{{{W_NS}}}t")] == ["C"]
+        assert "FMT" in [t.text for t in paras[1].iter(f"{{{W_NS}}}t")]

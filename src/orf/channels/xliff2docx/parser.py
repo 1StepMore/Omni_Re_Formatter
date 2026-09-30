@@ -28,7 +28,12 @@ logger = get_logger("channel.xliff2docx.parser")
 # Issue A: OPP emits one trans-unit per table cell with resname
 # ``table_{t}_r{r}_c{c}`` (raw node indices: t = table index over the whole
 # document, r = direct ``w:tr`` index, c = direct ``w:tc`` index).
-_TABLE_RESNAME_RE = re.compile(r"^table_(\d+)_r(\d+)_c(\d+)$")
+# OPP#80 Wave 0B: a future OPP release may add an optional ``_para{p}`` suffix
+# (0-based paragraph index within the cell).  The group is OPTIONAL, so a bare
+# ``table_{t}_r{r}_c{c}`` still matches with group(4) == None and takes the
+# exact same code path as before.  Deliberately duplicated in the sibling
+# channels (xliff2pptx.py:55, xliff2html/writer.py:318); keep in sync.
+_TABLE_RESNAME_RE = re.compile(r"^table_(\d+)_r(\d+)_c(\d+)(?:_para(\d+))?$")
 
 
 def _strip_wrapper(target_text: str) -> str:
@@ -245,22 +250,24 @@ def _process_trans_unit(
 
 def _parse_resname(
     resname: str | None,
-) -> tuple[int | None, int | None, tuple[int, int, int] | None]:
+) -> tuple[int | None, int | None, tuple[int, int, int, int | None] | None]:
     """Parse resname attribute for para_index, non_body_index or table_cell.
 
     Recognises three resname forms:
 
     * ``para_index_N`` → ``(N, None, None)``
     * ``non_body_N`` → ``(None, N, None)``
-    * ``table_{t}_r{r}_c{c}`` → ``(None, None, (t, r, c))``
+    * ``table_{t}_r{r}_c{c}`` → ``(None, None, (t, r, c, None))``
+    * ``table_{t}_r{r}_c{c}_para{p}`` → ``(None, None, (t, r, c, p))``
 
     Args:
         resname: The resname attribute value, or None.
 
     Returns:
         Tuple of (para_index, non_body_index, table_cell).  ``table_cell``
-        is a ``(t, r, c)`` tuple of ints or None.  A malformed ``table_...``
-        value yields None and never raises.
+        is a ``(t, r, c, para)`` tuple of ints (``para`` is None when the
+        optional ``_para{p}`` suffix is absent) or None.  A malformed
+        ``table_...`` value yields None and never raises.
     """
     para_index = None
     non_body_index = None
@@ -279,10 +286,12 @@ def _parse_resname(
         elif resname.startswith("table_"):
             match = _TABLE_RESNAME_RE.match(resname)
             if match:
+                para_str = match.group(4)
                 table_cell = (
                     int(match.group(1)),
                     int(match.group(2)),
                     int(match.group(3)),
+                    int(para_str) if para_str is not None else None,
                 )
     return para_index, non_body_index, table_cell
 

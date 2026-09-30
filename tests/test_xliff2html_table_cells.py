@@ -8,12 +8,13 @@ contract when the XLIFF carries no ``table_...`` resname.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from lxml import html as lxml_html
 
 from orf.channels.xliff2html import XLIFF2HTMLConverter
-from orf.channels.xliff2html.writer import backfill_table_cells
+from orf.channels.xliff2html.writer import _TABLE_RESNAME_RE, backfill_table_cells
 from orf.converters.options import ConverterOptions
 
 
@@ -129,3 +130,119 @@ class TestBackfillTableCellsDirect:
         translations = {"1": '<bx id="1"/>甲<ex id="1"/>'}
         assert backfill_table_cells(root, translations, xliff) == 1
         assert _cell_texts(str(lxml_html.tostring(root, encoding="unicode")))[0] == "甲"
+
+
+class TestTableResnameGrammar:
+    """The optional ``_para{p}`` group parses (OPP#80 Wave 0B)."""
+
+    def test_bare_resname_has_no_para_group(self):
+        match = _TABLE_RESNAME_RE.match("table_0_r0_c0")
+        assert match is not None
+        assert match.group(1, 2, 3, 4) == ("0", "0", "0", None)
+
+    def test_para_resname_parses_para_group(self):
+        match0 = _TABLE_RESNAME_RE.match("table_0_r0_c0_para0")
+        assert match0 is not None
+        assert match0.group(1, 2, 3, 4) == ("0", "0", "0", "0")
+
+        match12 = _TABLE_RESNAME_RE.match("table_0_r0_c0_para12")
+        assert match12 is not None
+        assert match12.group(1, 2, 3, 4) == ("0", "0", "0", "12")
+
+    def test_malformed_para_resname_does_not_match(self):
+        assert _TABLE_RESNAME_RE.match("table_0_r0_c0_paraX") is None
+
+    def test_para_resname_still_writes_positional_cell(self):
+        # Reaching written == 1 proves the inline 4-group unpack and the
+        # ``int(para_str)`` conversion executed without raising.
+        root = lxml_html.fromstring(HTML_TEMPLATE)
+        xliff = _xliff(_unit("1", "table_0_r0_c0_para0", "IP67", "甲"))
+        assert backfill_table_cells(root, {"1": "甲"}, xliff) == 1
+        assert _cell_texts(str(lxml_html.tostring(root, encoding="unicode")))[0] == "甲"
+
+
+class TestBackfillTableCellsParagraphUnits:
+    """OPP#80 Wave 1: paragraph-scoped writes (CONTRACT.md §1.1)."""
+
+    @staticmethod
+    def _root(cell_html: str):
+        return lxml_html.fromstring(f"<table><tr>{cell_html}</tr></table>")
+
+    @staticmethod
+    def _paragraphs(root) -> list[str]:
+        return ["".join(p.itertext()) for p in root.xpath("//td//p")]
+
+    def test_para_unit_writes_only_target_block(self):
+        root = self._root("<td><p>P0</p><p>P1</p></td>")
+        xliff = _xliff(
+            "\n".join(
+                [
+                    _unit("1", "table_0_r0_c0_para0", "P0", "译-P0"),
+                    _unit("2", "table_0_r0_c0_para1", "P1", "译-P1"),
+                ]
+            )
+        )
+        assert backfill_table_cells(root, {"1": "译-P0", "2": "译-P1"}, xliff) == 2
+        assert self._paragraphs(root) == ["译-P0", "译-P1"]
+
+    def test_para_unit_leaves_sibling_block_untouched(self):
+        root = self._root("<td><p>A</p><p>B</p><p>C</p></td>")
+        xliff = _xliff(_unit("1", "table_0_r0_c0_para1", "B", "译-B"))
+        assert backfill_table_cells(root, {"1": "译-B"}, xliff) == 1
+        out = str(lxml_html.tostring(root, encoding="unicode"))
+        assert self._paragraphs(root) == ["A", "译-B", "C"]
+        assert out.count("<p>") == 3
+
+    def test_para_out_of_range_skips_and_warns(self, caplog):
+        root = self._root("<td><p>A</p></td>")
+        xliff = _xliff(_unit("1", "table_0_r0_c0_para5", "A", "译-A"))
+        with caplog.at_level(logging.WARNING):
+            assert backfill_table_cells(root, {"1": "译-A"}, xliff) == 0
+        assert self._paragraphs(root) == ["A"]
+        assert any("out of range" in r.getMessage() for r in caplog.records)
+
+    def test_para_duplicate_keeps_first_and_warns(self, caplog):
+        root = self._root("<td><p>A</p><p>B</p></td>")
+        xliff = _xliff(
+            "\n".join(
+                [
+                    _unit("1", "table_0_r0_c0_para1", "B", "第一"),
+                    _unit("2", "table_0_r0_c0_para1", "B", "第二"),
+                ]
+            )
+        )
+        with caplog.at_level(logging.WARNING):
+            assert backfill_table_cells(root, {"1": "第一", "2": "第二"}, xliff) == 1
+        assert self._paragraphs(root) == ["A", "第一"]
+        assert any("duplicate" in r.getMessage() for r in caplog.records)
+
+    def test_mixed_bare_and_para_never_falls_back_to_whole_cell(self, caplog):
+        root = self._root("<td><p>A</p><p>B</p></td>")
+        xliff = _xliff(
+            "\n".join(
+                [
+                    _unit("1", "table_0_r0_c0", "A\nB", "裸译"),
+                    _unit("2", "table_0_r0_c0_para0", "A", "译-A"),
+                ]
+            )
+        )
+        with caplog.at_level(logging.WARNING):
+            assert backfill_table_cells(root, {"1": "裸译", "2": "译-A"}, xliff) == 1
+        out = str(lxml_html.tostring(root, encoding="unicode"))
+        assert self._paragraphs(root) == ["译-A", "B"]
+        assert "裸译" not in out
+        assert any("bare unit" in r.getMessage() for r in caplog.records)
+
+    def test_bare_resname_unchanged_regression(self):
+        root = self._root("<td><p>A</p><p>B</p></td>")
+        xliff = _xliff(_unit("1", "table_0_r0_c0", "A\nB", "裸译"))
+        assert backfill_table_cells(root, {"1": "裸译"}, xliff) == 1
+        assert self._paragraphs(root) == []
+        assert "".join(root.xpath("//td")[0].itertext()) == "裸译"
+
+    def test_inline_only_cell_para0_targets_whole_cell(self):
+        root = self._root("<td>a<br/>b</td>")
+        xliff = _xliff(_unit("1", "table_0_r0_c0_para0", "ab", "整译"))
+        assert backfill_table_cells(root, {"1": "整译"}, xliff) == 1
+        assert "".join(root.xpath("//td")[0].itertext()) == "整译"
+        assert root.xpath("//td//br") == []

@@ -8,7 +8,7 @@ import posixpath
 import re
 import zipfile
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, NamedTuple, Optional
 
 from lxml import etree
 
@@ -48,11 +48,15 @@ _SLIDE_SUFFIX = ".xml"
 # Issue #58: OPP emits one trans-unit per PPTX table cell with resname
 # ``table_{t}_r{r}_c{c}`` (raw node indices: t = table index accumulated across
 # slides in sldIdLst order, r = direct ``a:tr`` index, c = direct ``a:tc``
-# index).  Deliberately DUPLICATED rather than imported: the twin lives in the
-# sibling channel ``xliff2docx/parser.py:31`` (and ``xliff2html/writer.py:318``
-# repeats it too), so importing across channels would invert the dependency
-# direction.  Keep the one-line pattern in sync with those twins.
-_TABLE_RESNAME_RE = re.compile(r"^table_(\d+)_r(\d+)_c(\d+)$")
+# index).  OPP#80 Wave 0B: a future OPP release may add an optional
+# ``_para{p}`` suffix (0-based paragraph index within the cell); the group is
+# OPTIONAL so a bare ``table_{t}_r{r}_c{c}`` still matches with group(4) ==
+# None and takes the exact same code path as before.  Deliberately DUPLICATED
+# rather than imported: the twin lives in the sibling channel
+# ``xliff2docx/parser.py:31`` (and ``xliff2html/writer.py:318`` repeats it
+# too), so importing across channels would invert the dependency direction.
+# Keep the one-line pattern in sync with those twins.
+_TABLE_RESNAME_RE = re.compile(r"^table_(\d+)_r(\d+)_c(\d+)(?:_para(\d+))?$")
 
 # XLIFF namespaces (multi-version support)
 XLIFF_NS_1_2 = "urn:oasis:names:tc:xliff:document:1.2"
@@ -64,6 +68,21 @@ XLIFF_NS_MAP_2_0 = {"xliff": XLIFF_NS_2_0}
 # Backwards-compatible default: 1.2 (matches xliff2docx sibling)
 XLIFF_NS = XLIFF_NS_1_2
 XLIFF_NS_MAP = XLIFF_NS_MAP_1_2
+
+
+class _ParaCoord(NamedTuple):
+    """A concrete per-paragraph coordinate: table ``t``, row ``r``, col ``c``, ``para{p}``.
+
+    Only a ``_para{p}`` unit is ever described this way, so ``para`` is always a
+    concrete 0-based index — the type carries the guarantee the whole-cell path
+    never needs.  Grouping the four ints makes them one domain value instead of
+    a parameter list threaded through every helper.
+    """
+
+    table: int
+    row: int
+    col: int
+    para: int
 
 
 class XLIFF2PPTXConverter(BaseConverter):
@@ -389,7 +408,7 @@ class XLIFF2PPTXConverter(BaseConverter):
         """
         modified = dict(slide_files)
 
-        table_units: list[tuple[int, int, int, dict[str, object]]] = []
+        table_units: list[tuple[int, int, int, int | None, dict[str, object]]] = []
         trans_map: dict[str, Any] = {}
         for unit in xliff_data["units"]:
             table_cell = self._parse_table_resname(unit.get("resname"))
@@ -422,7 +441,7 @@ class XLIFF2PPTXConverter(BaseConverter):
             total_tables += len(list(root.iter(f"{A_PREFIX}tbl")))
 
         if table_units:
-            for table_t, row, col, _unit in table_units:
+            for table_t, row, col, _para, _unit in table_units:
                 if table_t >= total_tables:
                     logger.warning(
                         "resname table_%d_r%d_c%d out of range (have %d tables)",
@@ -531,32 +550,98 @@ class XLIFF2PPTXConverter(BaseConverter):
             return posixpath.normpath(target.lstrip("/"))
         return posixpath.normpath(posixpath.join("ppt", target))
 
-    def _parse_table_resname(self, resname: object) -> tuple[int, int, int] | None:
+    def _parse_table_resname(
+        self, resname: object
+    ) -> tuple[int, int, int, int | None] | None:
         if not isinstance(resname, str):
             return None
         match = _TABLE_RESNAME_RE.match(resname)
         if match is None:
             return None
-        return int(match.group(1)), int(match.group(2)), int(match.group(3))
+        para_str = match.group(4)
+        return (
+            int(match.group(1)),
+            int(match.group(2)),
+            int(match.group(3)),
+            int(para_str) if para_str is not None else None,
+        )
+
+    @staticmethod
+    def _plan_table_unit_writes(
+        table_units: list[tuple[int, int, int, int | None, dict[str, object]]],
+    ) -> tuple[
+        list[tuple[int, int, int, int | None, dict[str, object]]],
+        list[tuple[str, tuple[object, ...]]],
+    ]:
+        """Split table units into the writes to apply and the skips to warn.
+
+        Contract (CONTRACT.md §Table Cell Coordinates): a cell whose units
+        include ANY ``_para{p}`` suffix is PER-PARAGRAPH.  For such a cell every
+        bare (``para is None``) unit is skipped — never written whole-cell —
+        because a whole-cell write would clear the runs the per-paragraph units
+        just filled.  A duplicated ``(t, r, c, para)`` keeps the FIRST
+        occurrence and skips the rest.  A cell with no ``_para`` unit at all is
+        bare-only and passes through unchanged, preserving the legacy
+        whole-cell behaviour byte-for-byte (bare duplicates included).
+
+        Pure: no logging, no mutation.  Returns ``(plan, alerts)`` where
+        ``plan`` holds the units to apply in their original order (the write
+        mode is encoded by ``para``: ``None`` = whole cell, ``int`` =
+        paragraph-scoped) and ``alerts`` is a list of ``(message, args)`` for
+        the caller to emit at WARNING level.
+        """
+        para_cells = {
+            (table_t, row, col)
+            for table_t, row, col, para, _unit in table_units
+            if para is not None
+        }
+        seen: set[tuple[int, int, int, int | None]] = set()
+        plan: list[tuple[int, int, int, int | None, dict[str, object]]] = []
+        alerts: list[tuple[str, tuple[object, ...]]] = []
+        for entry in table_units:
+            table_t, row, col, para, _unit = entry
+            if (table_t, row, col) in para_cells:
+                if para is None:
+                    alerts.append((
+                        "resname table_%d_r%d_c%d mixes bare and _para units; skipping bare",
+                        (table_t, row, col),
+                    ))
+                    continue
+                key = (table_t, row, col, para)
+                if key in seen:
+                    alerts.append((
+                        "resname table_%d_r%d_c%d_para%d duplicated; keeping first",
+                        (table_t, row, col, para),
+                    ))
+                    continue
+                seen.add(key)
+            plan.append(entry)
+        return plan, alerts
 
     def _apply_table_units_to_root(
         self,
         root: etree._Element,
-        table_units: list[tuple[int, int, int, dict[str, object]]],
+        table_units: list[tuple[int, int, int, int | None, dict[str, object]]],
         t_offset: int,
         n_tables: int,
     ) -> bool:
         """Write positional table units belonging to one slide, in place.
 
         Cells resolve by raw direct-child indices (``a:tbl`` -> ``a:tr`` ->
-        ``a:tc``), exactly as OPP numbers them.  The target is distributed
-        across the origin cell's own ``a:p``/``a:r`` runs; ``hMerge``/
-        ``vMerge`` covered siblings have no unit and are left untouched.
-        Out-of-range coordinates warn and skip.
+        ``a:tc``), exactly as OPP numbers them.  A bare unit (``para is None``)
+        distributes the target across every ``a:p``/``a:r``/``a:t`` of the
+        cell; a ``_para{p}`` unit writes ONLY within ``a:p[p]``, leaving its
+        sibling paragraphs byte-identical.  ``hMerge``/``vMerge`` covered
+        siblings have no unit and are left untouched.  Out-of-range coordinates
+        warn and skip.  Which units apply, and in what mode, is decided up
+        front by ``_plan_table_unit_writes``.
         """
+        plan, alerts = self._plan_table_unit_writes(table_units)
+        for message, args in alerts:
+            logger.warning(message, *args)
         tables = list(root.iter(f"{A_PREFIX}tbl"))
         changed = False
-        for table_t, row, col, unit in table_units:
+        for table_t, row, col, para, unit in plan:
             local = table_t - t_offset
             if not (0 <= local < n_tables):
                 continue
@@ -574,21 +659,65 @@ class XLIFF2PPTXConverter(BaseConverter):
                     table_t, row, col, len(cells),
                 )
                 continue
-            text_elements: list[etree._Element] = []
-            for p in cells[col].iter(f"{A_PREFIX}p"):
-                for r_element in p.findall(f"{A_PREFIX}r"):
-                    text_elements.extend(r_element.findall(f"{A_PREFIX}t"))
-            if not text_elements:
-                logger.warning(
-                    "resname table_%d_r%d_c%d has no runs to backfill",
-                    table_t, row, col,
+            if para is None:
+                # Legacy whole-cell path — deliberately untouched so bare
+                # resnames keep producing byte-identical output.
+                text_elements: list[etree._Element] = []
+                for p in cells[col].iter(f"{A_PREFIX}p"):
+                    for r_element in p.findall(f"{A_PREFIX}r"):
+                        text_elements.extend(r_element.findall(f"{A_PREFIX}t"))
+                if not text_elements:
+                    logger.warning(
+                        "resname table_%d_r%d_c%d has no runs to backfill",
+                        table_t, row, col,
+                    )
+                    continue
+                self._distribute_text_across_pptx_runs(
+                    text_elements, str(unit["target"])
                 )
-                continue
-            self._distribute_text_across_pptx_runs(
-                text_elements, str(unit["target"])
-            )
-            changed = True
+                changed = True
+            else:
+                coord = _ParaCoord(table_t, row, col, para)
+                if self._apply_para_unit_to_cell(
+                    cells[col], coord, str(unit["target"])
+                ):
+                    changed = True
         return changed
+
+    def _apply_para_unit_to_cell(
+        self,
+        cell: etree._Element,
+        coord: _ParaCoord,
+        target_text: str,
+    ) -> bool:
+        """Write ``target_text`` into ONE paragraph of ``cell`` (``a:tc``).
+
+        Paragraphs are enumerated with ``cell.iter(a:p)`` — the SAME primitive
+        the legacy whole-cell path uses — so ``coord.para`` matches OPP's raw
+        paragraph index (CONTRACT.md §Table Cell Coordinates); switching to
+        ``findall`` here would risk diverging when OPP numbers nested tables.
+        An out-of-range ``para``, or a paragraph holding zero ``a:t`` elements,
+        warns and skips: it never creates a run and never falls back to the
+        whole cell.  Returns True iff the paragraph was written.
+        """
+        paragraphs = list(cell.iter(f"{A_PREFIX}p"))
+        if not (0 <= coord.para < len(paragraphs)):
+            logger.warning(
+                "resname table_%d_r%d_c%d_para%d out of range (have %d paragraphs)",
+                coord.table, coord.row, coord.col, coord.para, len(paragraphs),
+            )
+            return False
+        text_elements: list[etree._Element] = []
+        for r_element in paragraphs[coord.para].findall(f"{A_PREFIX}r"):
+            text_elements.extend(r_element.findall(f"{A_PREFIX}t"))
+        if not text_elements:
+            logger.warning(
+                "resname table_%d_r%d_c%d_para%d has no runs to backfill",
+                coord.table, coord.row, coord.col, coord.para,
+            )
+            return False
+        self._distribute_text_across_pptx_runs(text_elements, target_text)
+        return True
 
     def _distribute_text_across_pptx_runs(
         self,

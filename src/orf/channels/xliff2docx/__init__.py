@@ -37,7 +37,13 @@ logger = get_logger("channel.xliff2docx")
 
 # ── Re-export shared names for backward compat ──────────────────────
 from ._ns import FUZZY_MATCH_THRESHOLD, A_NS, PIC_NS, WP_NS  # noqa: E402
-from .matcher import _distribute_text_across_runs  # noqa: E402
+from .matcher import (  # noqa: E402
+    PROCESS_WHOLE_CELL,
+    SKIP_BARE_IN_PARA_CELL,
+    SKIP_DUPLICATE_PARA,
+    _distribute_text_across_runs,
+    build_table_cell_plan,
+)
 from .parser import _strip_wrapper, _strip_inline_tags  # noqa: E402
 
 __all__ = [
@@ -222,8 +228,12 @@ class XLIFF2DOCXConverter(BaseConverter):
         row: int,
         col: int,
         target_text: str,
+        para: int | None = None,
     ) -> bool:
         """Issue A: positional backfill via ``resname="table_{t}_r{r}_c{c}"``.
+
+        OPP#80 Wave 1: ``para`` (when not None) scopes the write to a single
+        paragraph of the cell; ``None`` keeps the legacy whole-cell behavior.
 
         Delegates to ``orf.channels.xliff2docx.matcher.backfill_by_table_cell``.
         """
@@ -233,6 +243,7 @@ class XLIFF2DOCXConverter(BaseConverter):
             root, table_index, row, col, target_text,
             self._build_formatted_runs,
             _strip_inline_tags,
+            para,
         )
 
     def _backfill_fallback_textboxes(
@@ -661,6 +672,10 @@ class XLIFF2DOCXConverter(BaseConverter):
             # Build a mapping from original Chinese text → target text
             chinese_to_target: dict[str, str] = {}
 
+            # OPP#80 Wave 1: classify table-cell units once per conversion
+            # (whole-cell vs per-paragraph; mixed/duplicate resolution).
+            table_cell_plan = build_table_cell_plan(trans_units)
+
             for idx, tu in enumerate(trans_units, 1):
                 tu_id = tu["id"]
                 target_text = tu.get("target", "")
@@ -731,16 +746,40 @@ class XLIFF2DOCXConverter(BaseConverter):
                             f"paragraphs); falling back to text matching"
                         )
 
-                # Issue A: table_{t}_r{r}_c{c} positional lookup
+                # Issue A / OPP#80 Wave 1: table_{t}_r{r}_c{c}[_para{p}]
+                # positional lookup. Bare units keep the legacy whole-cell
+                # write-back; ``_para{p}`` units write exactly one paragraph.
                 table_cell = tu.get("table_cell")
                 if table_cell is not None:
+                    table_index, row, col, para = table_cell
+                    disposition = table_cell_plan.get(
+                        idx - 1, PROCESS_WHOLE_CELL
+                    )
+                    if disposition == SKIP_BARE_IN_PARA_CELL:
+                        logger.warning(
+                            "Skipping bare table_cell (%d, %d, %d) for unit "
+                            "%s: the cell has per-paragraph (_para) units, "
+                            "so whole-cell write-back would clobber them. "
+                            "Original source text preserved.",
+                            table_index, row, col, tu_id,
+                        )
+                        continue
+                    if disposition == SKIP_DUPLICATE_PARA:
+                        logger.warning(
+                            "Skipping duplicate table_cell_para %s for unit "
+                            "%s: that paragraph was already written by an "
+                            "earlier unit.",
+                            table_cell, tu_id,
+                        )
+                        continue
                     try:
                         cell_applied = self._backfill_by_table_cell(
                             root,
-                            table_cell[0],
-                            table_cell[1],
-                            table_cell[2],
+                            table_index,
+                            row,
+                            col,
                             target_text,
+                            para,
                         )
                     except Exception as e:
                         logger.warning(
@@ -758,6 +797,16 @@ class XLIFF2DOCXConverter(BaseConverter):
                             (body_paragraphs, all_paragraphs,
                              wt_text_map, body_paragraph_text_map,
                              all_paragraph_text_map) = self._rebuild_indexes(root)
+                        continue
+                    if para is not None:
+                        # Paragraph-scoped writes never fall back to text
+                        # matching: a missed paragraph stays untouched rather
+                        # than being guessed at (CONTRACT.md §Table Cell Coords).
+                        logger.warning(
+                            f"table_cell_para {table_cell} could not be "
+                            f"written for unit {tu_id}; skipping (no "
+                            f"text-match fallback for _para units)"
+                        )
                         continue
                     logger.warning(
                         f"table_cell {table_cell} out of range or missing for "
