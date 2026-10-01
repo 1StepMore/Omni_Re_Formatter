@@ -89,7 +89,26 @@ jobs:
           fi
 
       - name: Run tests with coverage
-        run: pytest tests/ -v --cov=src/orf/ --cov-report=xml --cov-fail-under=50 --ignore=tests/test_orf_mcp_server.py --ignore=tests/test_e2e_omni_pipeline.py
+        run: |
+          # pipefail so the step fails when pytest fails (tee always exits 0),
+          # including the --cov-fail-under gate; without it a red run would be
+          # reported green and no artifact would be left.
+          set -o pipefail
+          pytest tests/ -v --cov=src/orf/ --cov-report=xml --cov-fail-under=50 --ignore=tests/test_orf_mcp_server.py --ignore=tests/test_e2e_omni_pipeline.py 2>&1 | tee test_output.log
+          exit_status=$?
+          exit ${exit_status}
+
+      # Full pytest output survives even when the test step fails and the
+      # job goes red - it stays downloadable regardless of the verdict.
+      - name: Upload pytest logs (full, untruncated)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-logs
+          path: |
+            test_output.log
+            **/junit*.xml
+          if-no-files-found: ignore
 
   # Suite validation: ORF's own scenarios (orf-md/ + orf-xliff/ + tool-orf-*)
   # via the Omni Suite validation framework's per-module filter.
