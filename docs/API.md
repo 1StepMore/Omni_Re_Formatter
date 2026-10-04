@@ -103,17 +103,19 @@ orf apply-xliff INPUT_FILE [OPTIONS]
 | `--output`, `-o` | required | Output file path |
 | `--format`, `-f` | `docx` | One of: `docx`, `pptx`, `epub`, `html`, `odt` |
 | `--images-json` | none | Path to an `images.json` produced by OPP (enables image injection) |
-| `--force` | off | Bypass skeleton-vs-format validation for cross-format conversion (output may be broken) |
+| `--force` | off | Accepted for backward compatibility; inert. It no longer enables cross-format backfill (see Format validation) |
 | `--no-cache` | off | Skip the ORF content-addressed cache |
 | `--clear-cache` | off | Remove every ORF cache entry and exit |
 | `--max-file-size-mb` | none | Refuse files larger than N MB |
 | `--json` | off | Emit a JSON envelope |
 
-**Format validation.** By default, the extension of `INPUT_FILE` must match `--format`
+**Format validation.** The extension of `INPUT_FILE` must match `--format`
 (`.docx`/`.pptx`/`.epub`/`.html`/`.odt`) or be `.xlf`/`.xliff`/`.zip` for the ZIP-based
-formats (DOCX/PPTX/EPUB). Use `--force` to bypass — this is required for cross-format
-backfill (e.g. DOCX skeleton → PPTX output) and emits a `WARNING` instead of an error
-(`src/orf/cli.py:776`).
+formats (DOCX/PPTX/EPUB); for a `.zip` skeleton the detected *content* format must
+match too. A mismatch raises `click.BadParameter` (exit 2) and writes no file.
+Cross-format backfill (e.g. DOCX skeleton -> PPTX output) is **not implemented** —
+`--force` does not bypass this. Use `orf apply-md --target-format pptx` instead
+(`src/orf/commands/apply_xliff.py`).
 
 **Image injection.** When `--images-json` is provided and the format is DOCX, ORF
 calls `converter.inject_images(...)` to re-insert images at the original paragraph
@@ -130,9 +132,9 @@ orf apply-xliff original.docx --xliff translated.xlf --output result.docx
 orf apply-xliff original.docx --xliff translated.xlf \
   --output result.docx --images-json images.json
 
-# Cross-format (DOCX skeleton → PPTX output) — requires --force
-orf apply-xliff original.docx --xliff translated.xlf \
-  --output result.pptx --format pptx --force
+# Cross-format (DOCX skeleton -> PPTX output) — NOT supported; this exits 2
+# and writes nothing. Use the MD path:
+orf apply-md translated.md --target-format pptx --output result.pptx
 ```
 
 ### 1.4 `orf convert-batch` — Convert many MD files in parallel
@@ -198,7 +200,7 @@ $ orf info document.docx --json
 |------|---------|
 | 0 | Success |
 | 1 | File-size limit exceeded, or no MD files found in batch mode |
-| 2 | `click.BadParameter` (e.g., skeleton extension mismatch without `--force`, mutually exclusive flags) |
+| 2 | `click.BadParameter` (e.g., skeleton/format mismatch — with or without `--force`, mutually exclusive flags) |
 | Other non-zero | Conversion failed — see `result.errors[]` in the JSON envelope |
 
 ---
@@ -386,8 +388,9 @@ defining `From`, `To`, `Subject`, and `Date`.
 ### 3.3 XLIFF backfill formats
 
 `apply-xliff` supports 5 formats: `docx`, `pptx`, `epub`, `html`, `odt`.
-The format must match the source skeleton by default; cross-format conversion
-requires `--force` and emits a `WARNING`.
+The format must match the source skeleton (extension, plus detected content for
+`.zip` skeletons); cross-format conversion is **not implemented** and `--force`
+does not enable it.
 
 ---
 

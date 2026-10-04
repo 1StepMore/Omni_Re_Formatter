@@ -11,6 +11,43 @@ from orf.logging import get_logger
 
 logger = get_logger("cli")
 
+# e2e-test-suite#64: ORF's XLIFF channel is format-preserving and has never
+# converted between formats. `--force` used to "allow" a cross-format request,
+# but the backfill only rewrote the declared content type: a DOCX-shaped zip
+# was emitted as cross.pptx / cross.epub, which python-pptx and every EPUB
+# reader reject while the CLI exited 0. The flag stays accepted so existing
+# callers get the real cross-format error instead of "no such option" -- do
+# not re-add it as a bypass.
+_SOURCE_FORMAT_BY_EXT = {
+    ".docx": "DOCX",
+    ".doc": "Word",
+    ".pptx": "PPTX",
+    ".ppt": "PowerPoint",
+    ".epub": "EPUB",
+    ".odt": "ODT",
+    ".ods": "ODS",
+    ".pdf": "PDF",
+    ".html": "HTML",
+    ".htm": "HTML",
+    ".xml": "XML",
+    ".json": "JSON",
+    ".csv": "CSV",
+    ".xlsx": "XLSX",
+    ".ipynb": "Notebook",
+    ".eml": "EMail",
+}
+
+
+def _cross_format_error(source: str, requested: str) -> str:
+    """Cross-format rejection message: source format, --format, MD-path fix."""
+    return (
+        f"Cross-format XLIFF backfill is not implemented: source is {source}, "
+        f"--format is '{requested}'. ORF's XLIFF channel is format-preserving "
+        f"and cannot convert {source} -> {requested}. For cross-format output "
+        f"use the MD path: orf apply-md <translated.md> --target-format "
+        f"{requested} -o <out>.{requested}"
+    )
+
 
 @click.command("apply-xliff")
 @click.argument("input_file", type=click.Path(exists=True))
@@ -58,7 +95,15 @@ logger = get_logger("cli")
     "--force",
     is_flag=True,
     default=False,
-    help="Bypass skeleton format validation (may produce broken output). Use with caution.",
+    help=(
+        "Accepted for backward compatibility; it no longer enables cross-format "
+        "backfill. ORF's XLIFF channel is format-preserving and cannot convert "
+        "between formats -- it never could, so --force only produced a file "
+        "carrying the requested extension over the source format's actual "
+        "content, which every real reader of the target format rejects. "
+        "A cross-format request now fails with a clear error either way; use "
+        "'orf apply-md --target-format <fmt>' for cross-format output."
+    ),
 )
 @click.option(
     "--original-json",
@@ -105,10 +150,12 @@ def apply_xliff(
     """Apply XLIFF translation to original document.
 
     INPUT_FILE: Original document (DOCX/PPTX/EPUB/HTML) or skeleton (XLIFF/ZIP).
-    
-    XLIFF backfill is format-preserving — the skeleton file extension must match
-    --format by default. Use --force to bypass this validation for experimental
-    cross-format conversion (output may be incomplete or invalid).
+
+    XLIFF backfill is format-preserving and does not convert between formats:
+    the skeleton file extension (and, for .zip skeletons, its detected content)
+    must match --format, or the command fails with a "not implemented"
+    cross-format error. --force is still accepted but does not bypass that
+    check. Use `orf apply-md --target-format <fmt>` for cross-format output.
     """
     input_path = Path(input_file)
     output_path = Path(output)
@@ -141,6 +188,75 @@ def apply_xliff(
         logger.info(f"Cleared {n} cached file(s) from {_cache_root()}")
         click.echo(f"Cleared {n} cached file(s) from {_cache_root()}")
         return
+
+    if force:
+        logger.warning(
+            "--force is accepted but inert: ORF's XLIFF channel is "
+            "format-preserving and cross-format XLIFF backfill is not "
+            "implemented. A cross-format request fails either way."
+        )
+
+    # 2026-06-17 round 5 (FIX-#8): XLIFF backfill is format-preserving —
+    # fail early on a mismatched skeleton rather than letting
+    # translate-toolkit crash with an abstract error.
+    # Round 9: also accept .zip (OPP's skeleton.zip packaging).
+    # e2e-test-suite#64: moved ahead of the cache check so a warm cache entry
+    # from a pre-#64 `--force` run cannot replay "Created <cross.pptx> (cached)"
+    # for a request that must now fail.
+    _FORMAT_EXT = {
+        "docx": ".docx",
+        "pptx": ".pptx",
+        "epub": ".epub",
+        "html": ".html",
+        "odt": ".odt",
+        "pdf": ".pdf",
+        "json": ".json",
+    }
+    # e2e-test-suite#92: HTML joins because OPP now packages its HTML skeleton
+    # as `.skeleton.zip` (a top-level `index.html` entry) — the same packaging
+    # docx/pptx/epub already use. The content-level check below still verifies
+    # the archive really holds HTML, so a mislabelled zip is still rejected.
+    _ZIP_FORMATS = {"docx", "pptx", "epub", "html"}
+    if format in _FORMAT_EXT:
+        expected_ext = _FORMAT_EXT[format]
+        actual_ext = input_path.suffix.lower()
+        valid_exts = {".xlf", ".xliff", expected_ext}
+        if format in _ZIP_FORMATS:
+            valid_exts.add(".zip")
+        if actual_ext and actual_ext not in valid_exts:
+            source_label = _SOURCE_FORMAT_BY_EXT.get(actual_ext, actual_ext)
+            raise click.BadParameter(
+                f"Skeleton file extension '{actual_ext}' (source format: "
+                f"{source_label}) does not match --format '{format}' "
+                f"(expected '{expected_ext}' or '.zip'). "
+                + _cross_format_error(source_label, format)
+            )
+
+    # Skeleton content-level format validation for ZIP-based skeletons
+    # Peek inside .skeleton.zip files to detect actual format and compare
+    # with --format. This catches mismatches that the extension check
+    # cannot (e.g., a DOCX skeleton renamed to .zip with --format=pptx).
+    if format in _ZIP_FORMATS and input_path.suffix.lower() == ".zip":
+        from orf.detection.format_detector import FormatDetector
+
+        detected = None
+        try:
+            detector = FormatDetector()
+            detected = detector.detect_from_skeleton(str(input_path))
+        except Exception:
+            logger.debug(
+                f"Could not detect format from skeleton {input_path}, "
+                f"skipping content-level validation"
+            )
+
+        if detected is not None:
+            detected_lower = detected.lower()
+            if detected_lower != format:
+                raise click.BadParameter(
+                    f"Skeleton ZIP contains '{detected}' format content, "
+                    f"but --format is '{format}'. "
+                    + _cross_format_error(detected, format)
+                )
 
     cache_key = _cache_key_apply_xliff(input_path, xliff_path, format, images_json)
     if _check_cache(cache_key, output_path, f".{format}", no_cache=no_cache):
@@ -180,77 +296,6 @@ def apply_xliff(
     logger.info(
         f"Applying XLIFF {xliff_path} to {input_path} -> {output_path} ({format})"
     )
-
-    # 2026-06-17 round 5 (FIX-#8): XLIFF backfill is format-preserving —
-    # fail early on a mismatched skeleton rather than letting
-    # translate-toolkit crash with an abstract error.
-    # Round 9: also accept .zip (OPP's skeleton.zip packaging).
-    _FORMAT_EXT = {
-        "docx": ".docx",
-        "pptx": ".pptx",
-        "epub": ".epub",
-        "html": ".html",
-        "odt": ".odt",
-        "pdf": ".pdf",
-        "json": ".json",
-    }
-    _ZIP_FORMATS = {"docx", "pptx", "epub"}
-    if format in _FORMAT_EXT:
-        expected_ext = _FORMAT_EXT[format]
-        actual_ext = input_path.suffix.lower()
-        valid_exts = {".xlf", ".xliff", expected_ext}
-        if format in _ZIP_FORMATS:
-            valid_exts.add(".zip")
-        if actual_ext and actual_ext not in valid_exts:
-            if not force:
-                raise click.BadParameter(
-                    f"Skeleton file extension '{actual_ext}' does not match "
-                    f"--format '{format}' (expected '{expected_ext}' or '.zip'). "
-                    f"XLIFF backfill is format-preserving; use the MD path for "
-                    f"cross-format conversion, or pass --force to attempt anyway "
-                    f"(output may be incomplete or invalid)."
-                )
-            else:
-                logger.warning(
-                    f"FORCE MODE: Skeleton extension '{actual_ext}' does not match "
-                    f"--format '{format}'. Continuing with --force flag — output may be broken."
-                )
-
-    # Skeleton content-level format validation for ZIP-based skeletons
-    # Peek inside .skeleton.zip files to detect actual format and compare
-    # with --format. This catches mismatches that the extension check
-    # cannot (e.g., a DOCX skeleton renamed to .zip with --format=pptx).
-    if format in _ZIP_FORMATS and input_path.suffix.lower() == ".zip":
-        from orf.detection.format_detector import FormatDetector
-
-        detected = None
-        try:
-            detector = FormatDetector()
-            detected = detector.detect_from_skeleton(str(input_path))
-        except Exception:
-            logger.debug(
-                f"Could not detect format from skeleton {input_path}, "
-                f"skipping content-level validation"
-            )
-
-        if detected is not None:
-            detected_lower = detected.lower()
-            if detected_lower != format:
-                msg = (
-                    f"Skeleton ZIP contains '{detected}' format content, "
-                    f"but --format is '{format}'. "
-                    f"XLIFF backfill is format-preserving; use the MD path for "
-                    f"cross-format conversion, or pass --force to attempt anyway "
-                    f"(output may be incomplete or invalid)."
-                )
-                if not force:
-                    raise click.BadParameter(msg)
-                else:
-                    logger.warning(
-                        f"FORCE MODE: Skeleton ZIP contains '{detected}' format, "
-                        f"but --format is '{format}'. Continuing with --force flag — "
-                        f"output may be broken."
-                    )
 
     from orf.converters.options import ConverterOptions
 
@@ -330,13 +375,17 @@ def apply_xliff(
             f"       Use --format <format> to specify"
         )
 
-    # e2e-test-suite#86: honor --force here like the two skeleton checks
-    # above — without this guard a raw cross-format skeleton is re-rejected
-    # after already passing with a FORCE MODE warning.
-    if not force and not converter.validate_input(input_path):
+    # e2e-test-suite#86 added this gate for --force; e2e-test-suite#64 removed
+    # the --force exemption, so an extensionless skeleton (which slips past
+    # both CLI-level checks) is rejected with or without the flag.
+    if not converter.validate_input(input_path):
         raise click.ClickException(
             f"Input file '{input_path}' is not valid for {format} format. "
-            f"Skeleton file must have a valid extension (.{format} or .zip)."
+            f"Skeleton file must have a valid extension (.{format} or .zip). "
+            f"XLIFF backfill is format-preserving and cross-format XLIFF "
+            f"backfill is not implemented; for cross-format output use the "
+            f"MD path: orf apply-md <translated.md> --target-format {format} "
+            f"-o <out>.{format}"
         )
 
     result = converter.convert(input_path, xliff_path, output_path, options=opts)

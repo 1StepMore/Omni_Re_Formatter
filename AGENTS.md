@@ -76,7 +76,7 @@ src/orf/
 
 - `--separate-images` (default true) — extract `![…](…)` refs to a sibling `images.json` instead of inlining
 - `--embed-images` — base64-inline images into the output (works for DOCX/HTML/EPUB; not PPTX)
-- `--force` (`apply-xliff` only) — bypass skeleton-vs-format validation for cross-format backfill
+- `--force` (`apply-xliff` only) — accepted but inert; it does **not** enable cross-format backfill (see "Cross-format XLIFF" below)
 - `--reference-doc <path>` — pandoc reference template for DOCX output
 - `--template <path>` — pandoc template
 - `--max-file-size-mb <N>` — reject inputs larger than N MB
@@ -187,8 +187,9 @@ It contains:
 - `word/styles.xml`, `word/numbering.xml` — preserved
 - `word/media/*` — preserved (E2E-07 fuzzy match by cx/cy to avoid double-insert)
 
-**Cross-format XLIFF backfill** (e.g., DOCX XLIFF → PPTX): requires
-`--force`. ORF warns + proceeds.
+**Cross-format XLIFF backfill** (e.g., DOCX XLIFF → PPTX): **not
+implemented.** ORF refuses with a clear error and emits no file. Use
+`orf apply-md --target-format pptx` instead.
 
 ## Foreman + Specialist orchestration
 
@@ -245,8 +246,8 @@ Key test files:
   fork). ORF recommends `.eml` for open-source compatibility.
 - **PDF XLIFF input** is intentionally **not** supported by OPP
   (PDF→XLIFF raises). Use MD path.
-- **Cross-format XLIFF** (e.g., DOCX→XLIFF→PPTX): requires
-  `--force`. ORF warns + proceeds.
+- **Cross-format XLIFF** (e.g., DOCX→XLIFF→PPTX): **not implemented.**
+  ORF refuses; `--force` is inert. Use the MD path.
 - **HITL**: ForemanAgent operations on files >100MB, cloud uploads,
   and `MANUAL_INTERVENTION` recovery strategies all require human
   approval before proceeding.
@@ -262,7 +263,7 @@ most common agent mistake.
 | Output formats | 16 (see table above) | Same format as source |
 | Engine | pandoc / pure Python | skeleton.zip reinjection |
 | Layout | Rendered by pandoc styles | Original layout preserved |
-| Cross-format | Native (MD → DOCX, MD → EPUB, etc.) | Requires `--force` (warns) |
+| Cross-format | Native (MD → DOCX, MD → EPUB, etc.) | Not supported — refused |
 | Images | `--separate-images` (default) or `--embed-images` | Auto-reinjected from skeleton |
 
 **Decision flow:**
@@ -272,8 +273,9 @@ most common agent mistake.
 3. Do you need exact original layout (fonts, styles, floating images)? → **`apply-xliff`**
 4. Otherwise → **`apply-md`** (simpler, more output options)
 
-**Cross-format XLIFF** (e.g. DOCX XLIFF → PPTX): add `--force`. ORF
-will warn that formats don't match but proceed.
+**Cross-format XLIFF** (e.g. DOCX XLIFF → PPTX): not available. ORF
+refuses the request and emits no artifact; `--force` no longer changes
+that. Use `apply-md`.
 
 **Full pipeline comparison**: See the suite-level
 [Pipeline Selection Strategy](https://github.com/1StepMore/e2e-test-suite/blob/main/README.md#pipeline-selection-strategy)

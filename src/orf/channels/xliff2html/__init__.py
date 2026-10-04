@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Optional, Any
+import zipfile
 
 from orf.converters.base import BaseConverter, ConversionResult
 from orf.mcp.schemas import ImagePlacement
@@ -27,6 +28,31 @@ _INLINE_TRANSLATION_SENTINEL = "\x00TRANSLATED_TEXT\x00"
 _PRESERVED_CHILD_TAGS = frozenset({
     "img", "br", "hr", "input", "video", "audio", "source", "a",
 })
+
+
+def _read_html_template(template: Path, encoding: str) -> str:
+    """Return the HTML document from a bare ``.html`` file or a skeleton zip.
+
+    OPP packages the HTML skeleton as ``<stem>.skeleton.zip`` holding a single
+    top-level HTML entry (e2e-test-suite#92), so a zip arriving here must be
+    unpacked rather than read as text. Entry selection deliberately mirrors
+    ``FormatDetector.detect_from_skeleton`` — top-level (no ``/``) ``.html``/
+    ``.htm`` entries only — so this converter and the format gate agree on what
+    counts as an HTML skeleton.
+    """
+    if template.suffix.lower() != ".zip":
+        return template.read_text(encoding=encoding)
+
+    with zipfile.ZipFile(template, "r") as zf:
+        candidates = [
+            name for name in zf.namelist()
+            if name.lower().endswith((".html", ".htm")) and "/" not in name
+        ]
+        if not candidates:
+            raise ValueError(
+                f"Skeleton zip {template.name} contains no top-level HTML entry"
+            )
+        return zf.read(sorted(candidates)[0]).decode(encoding)
 
 
 class XLIFF2HTMLConverter(BaseConverter):
@@ -79,14 +105,25 @@ class XLIFF2HTMLConverter(BaseConverter):
     def validate_input(self, input_path: Path | str) -> bool:
         """Validate that the HTML template file exists and is readable.
 
+        Accepts a bare ``.html``/``.htm`` document and also ``.zip``, because
+        OPP packages its HTML skeleton as ``<stem>.skeleton.zip`` (a top-level
+        ``index.html`` entry) since e2e-test-suite#92. For a zip, the archive's
+        HTML-ness is verified upstream by the ``--format`` extension check plus
+        ``FormatDetector.detect_from_skeleton``, so accepting the extension here
+        does not weaken format validation.
+
         Args:
-            input_path: Path to the HTML template file
+            input_path: Path to the HTML template file, or its skeleton zip
 
         Returns:
-            True if the input file exists and has .html/.htm extension
+            True if the input file exists and has .html/.htm/.zip extension
         """
         input_path = Path(input_path)
-        return input_path.exists() and input_path.suffix.lower() in (".html", ".htm")
+        return input_path.exists() and input_path.suffix.lower() in (
+            ".html",
+            ".htm",
+            ".zip",
+        )
 
     def convert(  # type: ignore[override]
         self,
@@ -120,7 +157,7 @@ class XLIFF2HTMLConverter(BaseConverter):
             )
 
         try:
-            html_content = html_template.read_text(encoding=opts.encoding)
+            html_content = _read_html_template(html_template, opts.encoding)
         except Exception as e:
             logger.warning("Failed to read HTML template: %s", e, exc_info=True)
             return ConversionResult(

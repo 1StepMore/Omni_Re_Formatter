@@ -30,7 +30,7 @@ Use this skill when you need to convert localized Markdown or XLIFF documents to
    ```
    orf apply-xliff <original.docx> --xliff <translated.xlf> --output <result.docx> --format docx
    ```
-3. Cross-format backfill (e.g. DOCX XLIFF → PPTX): add `--force`
+3. Cross-format backfill (e.g. DOCX XLIFF → PPTX): **not supported** — `apply-xliff` refuses it (exit 2, no artifact) and `--force` is inert. Use `apply-md` instead.
 
 ### batch-convert (Directory)
 1. Place translated MD files in an input directory
