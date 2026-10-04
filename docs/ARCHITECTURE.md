@@ -127,8 +127,9 @@ single most important architectural decision a user makes.
 - **Output:** the original document with every translatable `<text>` segment
   replaced by its XLIFF `<target>` value. All styles, headers, footers,
   tables, image positions, and page breaks are preserved.
-- **Trade-off:** slower and format-bound (skeleton extension must match
-  `--format`, or pass `--force`), but **lossless** for layout.
+- **Trade-off:** slower and format-bound (the skeleton extension — and, for
+  `.zip` skeletons, its detected content — must match `--format`), but
+  **lossless** for layout.
 - **When to use:** translated documents with complex formatting, tables,
   multi-column layouts, or many images.
 
@@ -252,9 +253,9 @@ format). The reason: the DOCX text node `<w:t>` has no direct equivalent in
 the PPTX XML schema, so a "backfill" would silently produce a half-empty
 PPTX.
 
-The `--force` flag bypasses this guard for experimental workflows. ORF emits
-a `WARNING` and proceeds, but the output is likely incomplete or visually
-broken. **For cross-format conversion, prefer the MD path** (`apply-md`):
+Cross-format XLIFF backfill is **not implemented**, and `--force` does not
+bypass this guard — it is still accepted, but a cross-format request fails and
+writes no file. **For cross-format conversion use the MD path** (`apply-md`):
 it's a clean re-build in the target format.
 
 ### 4.3 Image re-injection (v0.4.0+)
@@ -353,7 +354,8 @@ localization pipeline needs to decide:
 - Should I use the MD path or the XLIFF path?
 - Should the PDF be WeasyPrint or LaTeX?
 - Should I extract images to a sidecar or inline them?
-- Is this a cross-format conversion that needs `--force`?
+- Is this a cross-format conversion? (Then the MD path is required — the
+  XLIFF path is format-preserving.)
 
 The Foreman encapsulates those decisions. Today it is used by ORF's
 internal test orchestration and by a few agent-style batch jobs. The

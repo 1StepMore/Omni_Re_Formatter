@@ -23,10 +23,11 @@ def _run_orf_cli(*args: str) -> subprocess.CompletedProcess:
     """Run ORF CLI as a subprocess (matches production invocation).
 
     ORF keeps a content-addressed output cache under ``OMNI_CACHE_DIR``
-    (default ``~/.omni_cache``). A warm entry short-circuits the conversion and
-    prints ``Created ... (cached)`` instead of the FORCE MODE warning, so these
-    CLI-contract tests would depend on whatever ran before them in the same job.
-    Give every invocation its own cache root to keep them order-independent.
+    (default ``~/.omni_cache``). The cache check runs before the conversion, so
+    a warm entry short-circuits it and prints ``Created ... (cached)`` instead of
+    the real result -- these CLI-contract tests would then depend on whatever ran
+    before them in the same job. Give every invocation its own cache root to keep
+    them order-independent.
     """
     cmd = [str(_VENV_PYTHON), "-m", "orf", *args]
     with tempfile.TemporaryDirectory(prefix="orf-cli-cache-") as cache_dir:
@@ -178,31 +179,94 @@ class TestZipSkeletonAccepted:
 
 
 class TestForceFlag:
-    """W2.2: --force flag bypasses skeleton format validation with a warning."""
+    """e2e-test-suite#64: ``--force`` is accepted but inert.
 
-    def test_force_bypasses_validation(self, tmp_path):
-        """--force allows cross-format skeleton/format mismatch to proceed."""
+    It used to downgrade both skeleton-format guards to a ``FORCE MODE``
+    warning. It never converted anything: the backfill only rewrote the
+    declared content type, so a DOCX skeleton came out as a DOCX-shaped
+    ``cross.pptx`` / ``cross.epub`` -- rejected by python-pptx and by every
+    EPUB reader while the CLI exited 0. The bypass is removed; the flag stays
+    accepted so a caller gets the real cross-format error, not "no such option".
+    """
+
+    def test_force_does_not_bypass_extension_mismatch(self, tmp_path):
+        """--force must fail exactly like the unforced run, with no artifact."""
         skeleton = tmp_path / "input.pptx"
         skeleton.write_bytes(b"PK\x03\x04")
         xlf = tmp_path / "translation.xlf"
-        xlf.write_text('<?xml version="1.0"?><xliff/>')
+        _create_xliff(xlf)
         output = tmp_path / "out.docx"
 
-        # Without --force: should fail with format mismatch
-        result = _run_orf_cli(
+        unforced = _run_orf_cli(
             "apply-xliff", str(skeleton),
             "--xliff", str(xlf),
             "--output", str(output),
             "--format", "docx",
         )
-        assert result.returncode != 0
-        combined = result.stdout + result.stderr
-        assert "does not match" in combined, (
-            f"Expected format rejection without --force; got:\n{combined}"
+        forced = _run_orf_cli(
+            "apply-xliff", str(skeleton),
+            "--xliff", str(xlf),
+            "--output", str(output),
+            "--format", "docx",
+            "--force",
         )
 
-        # With --force: should NOT fail with the BadParameter rejection
-        # (it may still fail for other reasons, but the FORCE MODE warning is present)
+        for label, result in (("unforced", unforced), ("forced", forced)):
+            combined = result.stdout + result.stderr
+            assert result.returncode != 0, (
+                f"{label}: cross-format must exit non-zero; got {result.returncode}\n"
+                f"{combined}"
+            )
+            assert "does not match --format 'docx'" in combined, (
+                f"{label}: expected the extension-mismatch rejection; got:\n{combined}"
+            )
+            assert "not implemented" in combined, (
+                f"{label}: message must say cross-format is not implemented; "
+                f"got:\n{combined}"
+            )
+            assert "orf apply-md" in combined, (
+                f"{label}: message must point at the MD path; got:\n{combined}"
+            )
+            assert not output.exists(), (
+                f"{label}: rejected cross-format request wrote {output}"
+            )
+
+    def test_force_does_not_bypass_zip_content_mismatch(self, tmp_path):
+        """--force must not downgrade the content-level guard either."""
+        skeleton = tmp_path / "input.skeleton.zip"
+        _create_docx_skeleton_zip(skeleton)
+        xlf = tmp_path / "translation.xlf"
+        _create_xliff(xlf)
+        output = tmp_path / "out.pptx"
+
+        result = _run_orf_cli(
+            "apply-xliff", str(skeleton),
+            "--xliff", str(xlf),
+            "--output", str(output),
+            "--format", "pptx",
+            "--force",
+        )
+        combined = result.stdout + result.stderr
+        assert result.returncode != 0, (
+            f"--force must not bypass the content-level guard; "
+            f"got rc={result.returncode}\n{combined}"
+        )
+        assert "Skeleton ZIP contains 'DOCX' format content" in combined, (
+            f"expected the content-level rejection wording; got:\n{combined}"
+        )
+        assert "FORCE MODE" not in combined, (
+            f"the FORCE MODE warning path must be gone; got:\n{combined}"
+        )
+        assert not output.exists(), f"--force wrote {output}"
+
+    def test_force_is_harmless_on_matching_format(self, tmp_path):
+        """The control: same-format backfill still succeeds with --force."""
+        skeleton = tmp_path / "input.skeleton.zip"
+        _create_docx_skeleton_zip(skeleton)
+        xlf = tmp_path / "translation.xlf"
+        _create_xliff(xlf, source="Hello World", target="Hello World")
+        output = tmp_path / "out.docx"
+
         result = _run_orf_cli(
             "apply-xliff", str(skeleton),
             "--xliff", str(xlf),
@@ -210,34 +274,25 @@ class TestForceFlag:
             "--format", "docx",
             "--force",
         )
-        combined = result.stdout + result.stderr
-        # BadParameter produces "Error: Invalid value:" — must be absent
-        assert "Invalid value" not in combined, (
-            f"--force should bypass BadParameter; got:\n{combined}"
+        assert result.returncode == 0, (
+            f"--force must stay accepted and harmless on a matching format; "
+            f"got rc={result.returncode}\nstdout: {result.stdout}\nstderr: {result.stderr}"
         )
-        # FORCE MODE warning must be present
-        assert "FORCE MODE" in combined, (
-            f"--force should emit warning; got:\n{combined}"
-        )
+        assert output.exists(), f"same-format backfill wrote no output\n{result.stderr}"
+        assert "No such option" not in result.stdout + result.stderr
 
-    def test_force_produces_warning_on_mismatch(self, tmp_path):
-        """--force emits a clear warning when bypassing format validation."""
-        skeleton = tmp_path / "input.pptx"
-        skeleton.write_bytes(b"PK\x03\x04")
-        xlf = tmp_path / "translation.xlf"
-        xlf.write_text('<?xml version="1.0"?><xliff/>')
-        output = tmp_path / "out.docx"
-
-        result = _run_orf_cli(
-            "apply-xliff", str(skeleton),
-            "--xliff", str(xlf),
-            "--output", str(output),
-            "--format", "docx",
-            "--force",
+    def test_force_flag_help_says_it_does_not_enable_cross_format(self, tmp_path):
+        """`--help` must not advertise a bypass ORF cannot honour."""
+        result = _run_orf_cli("apply-xliff", "--help")
+        assert result.returncode == 0, f"--help failed: {result.stderr}"
+        # click hard-wraps option help, so compare on whitespace-collapsed text.
+        help_text = " ".join(result.stdout.split())
+        assert "--force" in help_text, "the --force option disappeared from --help"
+        assert "no longer enables cross-format" in help_text, (
+            f"--force help text still advertises the cross-format bypass:\n{help_text}"
         )
-        combined = result.stdout + result.stderr
-        assert "FORCE MODE" in combined or "force" in combined.lower(), (
-            f"--force warning not produced; got:\n{combined}"
+        assert "orf apply-md" in help_text, (
+            f"--force help text must name the MD path:\n{help_text}"
         )
 
 
@@ -349,8 +404,12 @@ class TestSkeletonContentValidation:
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
-    def test_docx_skeleton_accepts_pptx_with_force(self, tmp_path):
-        """DOCX skeleton .zip with --format pptx --force must succeed with warning."""
+    def test_docx_skeleton_rejects_pptx_format_with_force(self, tmp_path):
+        """DOCX skeleton .zip with --format pptx --force must still be rejected.
+
+        e2e-test-suite#64: this used to warn and exit 0, emitting the DOCX zip
+        under a .pptx extension.
+        """
         skeleton = tmp_path / "input.skeleton.zip"
         _create_docx_skeleton_zip(skeleton)
         xlf = tmp_path / "translation.xlf"
@@ -365,13 +424,14 @@ class TestSkeletonContentValidation:
             "--force",
         )
         combined = result.stdout + result.stderr
-        assert "FORCE MODE" in combined, (
-            f"--force should produce FORCE MODE warning; got:\n{combined}"
+        assert result.returncode != 0, (
+            f"--force must not bypass the content-level guard; "
+            f"got rc={result.returncode}\n{combined}"
         )
-        # BadParameter produces "Error: Invalid value:" — must be absent
-        assert "Invalid value" not in combined, (
-            f"--force should bypass BadParameter; got:\n{combined}"
+        assert "Invalid value" in combined, (
+            f"expected the click BadParameter rejection; got:\n{combined}"
         )
+        assert not output.exists(), f"--force wrote {output}\n{combined}"
 
     def test_ppt_skeleton_rejects_docx_format(self, tmp_path):
         """PPTX skeleton .zip with --format docx must fail with skeleton error."""
@@ -397,31 +457,20 @@ class TestSkeletonContentValidation:
         )
 
 
-class TestForceBypassesFinalConverterGate:
-    """e2e-test-suite#86: the final converter ``validate_input`` gate must
-    honor ``--force``.
+class TestForceRejectedByFinalConverterGate:
+    """e2e-test-suite#64: the final ``converter.validate_input`` gate no
+    longer honours ``--force``.
 
-    The two CLI-level skeleton checks (extension check + ZIP content-level
-    check) already honor ``--force`` by emitting a FORCE MODE warning and
-    proceeding. But the last gate before conversion —
-    ``if not converter.validate_input(input_path)`` in ``apply_xliff.py`` —
-    re-rejected inputs the earlier checks had allowed through, so a raw
-    cross-format skeleton (e.g. DOCX-named input with ``--format pptx
-    --force``) still exited 1 with
-    ``"Input file ... is not valid for pptx format"``. That contradicts the
-    documented ``--force`` contract (warn + proceed) and breaks the suite's
-    ``test_cross_format_e2e.py::TestCrossFormat::test_path_34_docx_xliff_to_pptx_force``.
+    e2e-test-suite#86 had relaxed this gate to
+    ``if not force and not converter.validate_input(...)`` so a raw
+    cross-format skeleton could proceed after the FORCE MODE warnings. With
+    the bypass removed the exemption had to go too, otherwise ``--force``
+    remained a working bypass for an extensionless skeleton -- the one shape
+    that slips past both CLI-level checks.
     """
 
-    def test_force_raw_docx_input_pptx_not_rejected_by_final_gate(self, tmp_path):
-        """Raw .docx input + --format pptx --force must pass the final gate.
-
-        The input is a valid DOCX zip named ``.docx`` (not a skeleton.zip):
-        the extension check fires its FORCE MODE warning, the content-level
-        ZIP check does not apply, and the final ``validate_input`` gate must
-        not re-reject. Conversion then repacks the DOCX zip as the output
-        (per the --force contract: "may produce broken output").
-        """
+    def test_force_raw_docx_input_pptx_rejected_by_final_gate(self, tmp_path):
+        """Raw .docx input + --format pptx --force must not reach the converter."""
         skeleton = tmp_path / "input.docx"
         _create_docx_skeleton_zip(skeleton)
         xlf = tmp_path / "translation.xlf"
@@ -436,26 +485,38 @@ class TestForceBypassesFinalConverterGate:
             "--force",
         )
         combined = result.stdout + result.stderr
-        # The exact bug signature (apply_xliff.py final gate) must be absent.
-        assert "is not valid for" not in combined, (
-            f"--force must bypass the final converter validate_input gate; "
-            f"got:\n{combined}"
+        assert result.returncode != 0, (
+            f"--force must not reach the converter for a cross-format request; "
+            f"rc={result.returncode}\n{combined}"
         )
-        # BadParameter produces "Error: Invalid value:" — must be absent
-        assert "Invalid value" not in combined, (
-            f"--force must not produce BadParameter; got:\n{combined}"
+        assert "does not match --format 'pptx'" in combined, (
+            f"expected the extension-check rejection; got:\n{combined}"
         )
-        # The extension check's FORCE MODE warning must still be emitted
-        assert "FORCE MODE" in combined, (
-            f"--force must emit FORCE MODE warning; got:\n{combined}"
+        assert not output.exists(), f"--force wrote {output}\n{combined}"
+
+    def test_force_extensionless_skeleton_rejected_by_final_gate(self, tmp_path):
+        """Extensionless input skips both CLI-level checks — the gate must not."""
+        skeleton = tmp_path / "skeleton"  # no suffix → earlier checks skip
+        _create_docx_skeleton_zip(skeleton)
+        xlf = tmp_path / "translation.xlf"
+        _create_xliff(xlf)
+        output = tmp_path / "out.pptx"
+
+        result = _run_orf_cli(
+            "apply-xliff", str(skeleton),
+            "--xliff", str(xlf),
+            "--output", str(output),
+            "--format", "pptx",
+            "--force",
         )
-        assert result.returncode == 0, (
-            f"--force raw .docx → pptx should exit 0 (repacked zip); "
-            f"rc={result.returncode}\nstdout: {result.stdout}\nstderr: {result.stderr}"
+        combined = result.stdout + result.stderr
+        assert result.returncode != 0, (
+            f"--force must not bypass the final gate; rc={result.returncode}\n{combined}"
         )
-        assert output.exists(), (
-            f"--force conversion must produce an output file; got:\n{combined}"
+        assert "is not valid for pptx format" in combined, (
+            f"expected the final validate_input gate to fire; got:\n{combined}"
         )
+        assert not output.exists(), f"--force wrote {output}\n{combined}"
 
     def test_no_force_raw_docx_pptx_still_rejected(self, tmp_path):
         """Without --force, raw .docx + --format pptx must still be rejected.

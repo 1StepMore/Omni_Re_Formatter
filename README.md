@@ -62,7 +62,7 @@ this module".
 
 - **pandoc path**: MD→{DOCX, ODT, EPUB, RTF, ICML} requires `pandoc` (provided automatically by `pypandoc-binary` when `pip install omni-re-formatter` is run).
 - **Pure Python path**: MD→HTML and MD→PDF (weasyprint engine) do not depend on pandoc; they use the `markdown` library + WeasyPrint.
-- **XLIFF cross-format**: `apply-xliff --force` bypasses format validation, attempting backfill across formats while emitting a warning.
+- **XLIFF cross-format**: not supported. `apply-xliff` is format-preserving; a cross-format request (e.g. DOCX XLIFF -> PPTX) fails with a "not implemented" error. `--force` is still accepted but inert. Use `apply-md` for cross-format output.
 - **Email format**: MD→MSG auto-generates default headers when `email_headers` frontmatter is missing, no longer hard-failing.
 - **MD→MSG format**: requires `aspose-email-foss` (GPLv3 open-source fork) — `pip install 'omni-re-formatter[email-output]'`.
   Aspose is a commercial library. **We recommend using .eml format** (fully supported by ORF with graceful fallback via W2.1), an open standard.

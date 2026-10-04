@@ -214,9 +214,10 @@ Floating images (anchored to the page, not the text flow) are handled via the
 
 ### 3.4 Cross-format backfill (e.g., DOCX skeleton → PPTX output)
 
-ORF is normally format-preserving: the skeleton extension must match `--format`.
-To attempt a cross-format conversion (e.g., turn a translated DOCX skeleton into
-a PPTX), pass `--force`. Output may be incomplete or visually broken:
+ORF's XLIFF channel is format-preserving: the skeleton extension must match
+`--format`. A cross-format request (turning a translated DOCX skeleton into a
+PPTX) is **not implemented** — it exits 2 with an error and writes no file.
+`--force` is still accepted but does not change this:
 
 ```bash
 orf apply-xliff original.docx \
@@ -224,10 +225,16 @@ orf apply-xliff original.docx \
   --output slides.pptx \
   --format pptx \
   --force
+# Error: Invalid value: Skeleton file extension '.docx' ... Cross-format XLIFF
+# backfill is not implemented ... use the MD path: orf apply-md <translated.md>
+# --target-format pptx -o <out>.pptx
 ```
 
-`--force` emits a `WARNING` to stderr. Prefer the MD path for cross-format
-conversion when fidelity matters.
+For cross-format output use the MD path:
+
+```bash
+orf apply-md translated.md --target-format pptx --output slides.pptx
+```
 
 ### 3.5 Inline XLIFF content (no file)
 

@@ -136,12 +136,9 @@ inside (`src/orf/cli.py:786`).
 orf apply-xliff original.pptx --xliff translated.xlf \
   --output result.pptx --format pptx
 
-# Option 2 — cross-format with --force (output may be broken)
-orf apply-xliff original.pptx --xliff translated.xlf \
-  --output result.docx --format docx --force
-
-# Option 3 — use the MD path for cross-format conversion
-# (cleaner output, but loses original layout)
+# Option 2 — use the MD path for cross-format conversion
+# (cross-format XLIFF backfill is not implemented; --force does not enable it.
+#  Output is cleaner, but loses the original layout)
 orf apply-md translated.md --target-format docx --output result.docx
 ```
 
