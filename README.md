@@ -38,7 +38,7 @@ this module".
 - ICML (InDesign), SRT (subtitles)
 
 ### XLIFF Backfill
-- DOCX, PPTX, EPUB, HTML, ODT
+- DOCX, PPTX, EPUB, HTML, ODT, XLSX
 
 ### Cloud Storage
 - AWS S3, Azure Blob Storage
@@ -298,7 +298,7 @@ src/orf/
 - **Audit Logs**: correlation_id + agent_id full-chain tracing
 - 400+ test cases (including MCP integration tests + end-to-end pipeline tests)
 - MD backfill: 16 formats (DOCX, ODT, EPUB, HTML, RTF, PDF, PPTX, ICML, SRT, XLSX, CSV, JSON, XML, IPYNB, EML, MSG)
-- XLIFF backfill: 5 formats (DOCX, PPTX, EPUB, HTML, ODT)
+- XLIFF backfill: 6 formats (DOCX, PPTX, EPUB, HTML, ODT, XLSX)
 - Cloud storage: S3 + Azure Blob integration
 - AI: Layout overflow detection and correction
 - Data formats: XLSX, CSV, JSON

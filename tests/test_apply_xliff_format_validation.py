@@ -296,6 +296,120 @@ class TestForceFlag:
         )
 
 
+class TestXlsxSkeletonRegistration:
+    """e2e-test-suite#92: ``xlsx`` joins the XLIFF backfill formats.
+
+    OPP packages its XLSX skeleton as ``<stem>.skeleton.zip`` — the workbook
+    plus an ``xliff_map.json`` sidecar — so registering the format means two
+    things at once: a ``.zip`` skeleton must be accepted, and the content-level
+    detection branch must stay active for it so a skeleton of another format
+    renamed ``.zip`` is still rejected (the e2e-test-suite#64 guard).
+    """
+
+    def test_xlsx_is_a_zip_backfill_format(self):
+        from orf.commands.apply_xliff import _FORMAT_EXT, _ZIP_FORMATS
+
+        assert "xlsx" in _ZIP_FORMATS, (
+            "xlsx is missing from _ZIP_FORMATS, so OPP's .skeleton.zip would be "
+            "rejected on its extension"
+        )
+        assert _FORMAT_EXT["xlsx"] == ".xlsx"
+
+    def test_xlsx_is_an_accepted_format_choice(self):
+        result = _run_orf_cli("apply-xliff", "--help")
+        assert result.returncode == 0, result.stderr
+        import re
+
+        match = re.search(r"--format \[([^\]]+)\]", result.stdout)
+        assert match, result.stdout
+        assert "xlsx" in match.group(1).split("|"), match.group(1)
+
+    def test_docx_skeleton_with_format_xlsx_is_still_rejected(self, tmp_path):
+        """The #64 guard must survive xlsx's arrival in _ZIP_FORMATS."""
+        skeleton = tmp_path / "input.skeleton.zip"
+        _create_docx_skeleton_zip(skeleton)
+        xlf = tmp_path / "translation.xlf"
+        _create_xliff(xlf)
+        output = tmp_path / "out.xlsx"
+
+        for extra in ([], ["--force"]):
+            result = _run_orf_cli(
+                "apply-xliff", str(skeleton),
+                "--xliff", str(xlf),
+                "--output", str(output),
+                "--format", "xlsx",
+                *extra,
+            )
+            combined = result.stdout + result.stderr
+            label = "--force" if extra else "plain"
+            assert result.returncode != 0, (
+                f"{label}: DOCX skeleton + --format xlsx must be rejected; "
+                f"got rc={result.returncode}\n{combined}"
+            )
+            assert "Skeleton ZIP contains 'DOCX' format content" in combined, (
+                f"{label}: expected the content-level rejection; got:\n{combined}"
+            )
+            assert "not implemented" in combined
+            assert not output.exists(), f"{label} wrote {output}"
+
+    def test_xlsx_skeleton_backfill_succeeds_end_to_end(self, tmp_path):
+        """The positive control: a real XLSX skeleton + --format xlsx."""
+        import json
+
+        import openpyxl
+
+        book = tmp_path / "book.xlsx"
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Sheet1"
+        ws["A1"] = "Name"
+        ws["B1"] = 42
+        wb.save(book)
+
+        payload = {
+            "version": 1,
+            "sheets": {"Sheet1": [{"id": 1, "row": 1, "cells": [
+                {"ref": "A1", "translatable": True},
+                {"ref": "B1", "translatable": False},
+            ]}]},
+        }
+        import zipfile
+
+        skeleton = tmp_path / "book.skeleton.zip"
+        with zipfile.ZipFile(skeleton, "w", zipfile.ZIP_DEFLATED) as zf:
+            with zipfile.ZipFile(book) as source:
+                for info in source.infolist():
+                    zf.writestr(info, source.read(info))
+            zf.writestr("xliff_map.json", json.dumps(payload))
+
+        xlf = tmp_path / "translation.xlf"
+        xlf.write_text(
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<xliff xmlns="urn:oasis:names:tc:xliff:document:1.2" version="1.2">'
+            '<file><body>'
+            '<trans-unit id="1"><source>Name | 42</source>'
+            '<target>名称 | 42</target></trans-unit>'
+            "</body></file></xliff>",
+            encoding="utf-8",
+        )
+        output = tmp_path / "out.xlsx"
+
+        result = _run_orf_cli(
+            "apply-xliff", str(skeleton),
+            "--xliff", str(xlf),
+            "--output", str(output),
+            "--format", "xlsx",
+        )
+        assert result.returncode == 0, (
+            f"xlsx backfill failed: rc={result.returncode}\n"
+            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+        assert output.exists(), result.stdout
+        out = openpyxl.load_workbook(output)
+        assert out["Sheet1"]["A1"].value == "名称"
+        assert out["Sheet1"]["B1"].value == 42, "numeric cell was overwritten"
+
+
 # ── Helpers for skeleton content-level validation tests ────────────────
 
 _DOCX_SKELETON_DOCUMENT = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -552,7 +666,7 @@ class TestForceRejectedByFinalConverterGate:
 # must keep rejecting for every supported target format; `json` returns before
 # the gate and is intentionally excluded.
 
-_GATE_FORMATS = ["docx", "pptx", "epub", "html", "odt", "pdf"]
+_GATE_FORMATS = ["docx", "pptx", "epub", "html", "odt", "pdf", "xlsx"]
 
 # docx already owns .docx, so its foreign extension is .pptx; .docx is foreign
 # to every other format.
@@ -563,6 +677,7 @@ _FOREIGN_SKELETON_EXT = {
     "html": ".docx",
     "odt": ".docx",
     "pdf": ".docx",
+    "xlsx": ".docx",
 }
 
 

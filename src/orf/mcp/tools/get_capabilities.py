@@ -18,8 +18,10 @@ _MD_OUTPUT_FORMATS = [
     "srt", "csv", "xlsx", "xml", "ipynb", "eml", "msg", "json",
 ]
 
-# 7 apply-xliff backfill formats
-_XLIFF_BACKFILL_FORMATS = ["docx", "pptx", "epub", "html", "odf", "pdf", "json"]
+# apply-xliff backfill formats
+_XLIFF_BACKFILL_FORMATS = [
+    "docx", "pptx", "epub", "html", "odf", "pdf", "json", "xlsx",
+]
 
 # All 7 MCP tools (this one included)
 _TOOLS = [

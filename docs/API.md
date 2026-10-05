@@ -387,7 +387,11 @@ defining `From`, `To`, `Subject`, and `Date`.
 
 ### 3.3 XLIFF backfill formats
 
-`apply-xliff` supports 5 formats: `docx`, `pptx`, `epub`, `html`, `odt`.
+`apply-xliff` supports 6 formats: `docx`, `pptx`, `epub`, `html`, `odt`,
+`xlsx`. The XLSX channel needs OPP's `<stem>.skeleton.zip`, whose
+`xliff_map.json` sidecar records which cells were offered for translation;
+only cells marked translatable are written, so formulas, merged-range
+non-anchor cells and numbers survive the round trip.
 The format must match the source skeleton (extension, plus detected content for
 `.zip` skeletons); cross-format conversion is **not implemented** and `--force`
 does not enable it.
