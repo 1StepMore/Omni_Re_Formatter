@@ -348,3 +348,63 @@ class TestXLIFF2HTMLConverter:
         content = output.read_text(encoding="utf-8")
         assert "<img" in content
         assert "iVBORw0KGgo" in content
+
+class TestZipSkeletonInput:
+    """The zip-skeleton path (e2e-test-suite#92) needs its own coverage.
+
+    OPP packages the HTML skeleton as `<stem>.skeleton.zip` holding a top-level
+    `index.html`. Before this class the channel had ZERO zip coverage — the
+    merged behaviour was only ever checked by a manual CLI run, so a future
+    refactor of `_read_html_template` could break it silently.
+    """
+
+    HTML = (
+        '<!DOCTYPE html><html><body>'
+        '<p data-trans-unit-id="1">Hello</p>'
+        "</body></html>"
+    )
+    XLIFF = """<?xml version="1.0" encoding="UTF-8"?>
+<xliff version="1.2"><file source-language="en" target-language="zh" datatype="plaintext" original="t" date="2026-01-01T00:00:00Z"><body>
+<trans-unit id="1" resname="non_body_0"><source>Hello</source><target>你好</target></trans-unit>
+</body></file></xliff>"""
+
+    def _make_zip_skeleton(self, tmp_path: Path) -> Path:
+        import zipfile
+
+        skel = tmp_path / "t.skeleton.zip"
+        with zipfile.ZipFile(skel, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("index.html", self.HTML)
+        return skel
+
+    def test_validate_input_accepts_zip(self, tmp_path: Path):
+        assert XLIFF2HTMLConverter().validate_input(self._make_zip_skeleton(tmp_path))
+
+    def test_zip_skeleton_is_unpacked_and_translated(self, tmp_path: Path):
+        xlf = tmp_path / "t.xlf"
+        xlf.write_text(self.XLIFF, encoding="utf-8")
+        out = tmp_path / "out.html"
+        result = XLIFF2HTMLConverter().convert(
+            self._make_zip_skeleton(tmp_path), xlf, out,
+            options=ConverterOptions(),
+        )
+        assert result.success, f"Conversion failed: {result.errors}"
+        content = out.read_text(encoding="utf-8")
+        assert "你好" in content, f"translation not applied: {content!r}"
+        assert "<p" in content, "zip payload was not treated as an HTML document"
+
+    def test_zip_without_top_level_html_is_rejected(self, tmp_path: Path):
+        """Entry selection must mirror detect_from_skeleton: top-level only."""
+        import zipfile
+
+        skel = tmp_path / "nested.skeleton.zip"
+        with zipfile.ZipFile(skel, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("OEBPS/index.html", self.HTML)
+        xlf = tmp_path / "t.xlf"
+        xlf.write_text(self.XLIFF, encoding="utf-8")
+        result = XLIFF2HTMLConverter().convert(
+            skel, xlf, tmp_path / "out.html", options=ConverterOptions(),
+        )
+        assert not result.success, "a zip with no top-level HTML must not succeed"
+        assert any(
+            "no top-level HTML" in e.message for e in result.errors
+        ), [e.message for e in result.errors]
