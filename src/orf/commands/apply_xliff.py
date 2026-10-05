@@ -37,6 +37,30 @@ _SOURCE_FORMAT_BY_EXT = {
     ".eml": "EMail",
 }
 
+# Expected skeleton extension per --format. Module-level (like
+# _SOURCE_FORMAT_BY_EXT above) so the table that decides what apply-xliff
+# accepts is inspectable, not buried in the command body.
+_FORMAT_EXT = {
+    "docx": ".docx",
+    "pptx": ".pptx",
+    "epub": ".epub",
+    "html": ".html",
+    "odt": ".odt",
+    "pdf": ".pdf",
+    "json": ".json",
+    "xlsx": ".xlsx",
+}
+
+# Formats whose skeleton OPP may package as `.skeleton.zip`. Membership has two
+# effects: a `.zip` skeleton is accepted for that format, and the content-level
+# detection branch stays active for it, so a skeleton of another format renamed
+# `.zip` is still rejected (e2e-test-suite#64).
+# e2e-test-suite#92: html joins because OPP packages its HTML skeleton as
+# `.skeleton.zip` (a top-level `index.html` entry) — the same packaging
+# docx/pptx/epub already use. xlsx joins for the same reason: OPP's XLSX
+# skeleton is the workbook plus an `xliff_map.json` sidecar.
+_ZIP_FORMATS = {"docx", "pptx", "epub", "html", "xlsx"}
+
 
 def _cross_format_error(source: str, requested: str) -> str:
     """Cross-format rejection message: source format, --format, MD-path fix."""
@@ -62,7 +86,9 @@ def _cross_format_error(source: str, requested: str) -> str:
 @click.option(
     "--format",
     "-f",
-    type=click.Choice(["docx", "pptx", "epub", "html", "odt", "pdf", "json"]),
+    type=click.Choice(
+        ["docx", "pptx", "epub", "html", "odt", "pdf", "json", "xlsx"]
+    ),
     default="docx",
     help="Output format",
 )
@@ -149,7 +175,7 @@ def apply_xliff(
 
     """Apply XLIFF translation to original document.
 
-    INPUT_FILE: Original document (DOCX/PPTX/EPUB/HTML) or skeleton (XLIFF/ZIP).
+    INPUT_FILE: Original document (DOCX/PPTX/EPUB/HTML/XLSX) or skeleton (XLIFF/ZIP).
 
     XLIFF backfill is format-preserving and does not convert between formats:
     the skeleton file extension (and, for .zip skeletons, its detected content)
@@ -203,20 +229,6 @@ def apply_xliff(
     # e2e-test-suite#64: moved ahead of the cache check so a warm cache entry
     # from a pre-#64 `--force` run cannot replay "Created <cross.pptx> (cached)"
     # for a request that must now fail.
-    _FORMAT_EXT = {
-        "docx": ".docx",
-        "pptx": ".pptx",
-        "epub": ".epub",
-        "html": ".html",
-        "odt": ".odt",
-        "pdf": ".pdf",
-        "json": ".json",
-    }
-    # e2e-test-suite#92: HTML joins because OPP now packages its HTML skeleton
-    # as `.skeleton.zip` (a top-level `index.html` entry) — the same packaging
-    # docx/pptx/epub already use. The content-level check below still verifies
-    # the archive really holds HTML, so a mislabelled zip is still rejected.
-    _ZIP_FORMATS = {"docx", "pptx", "epub", "html"}
     if format in _FORMAT_EXT:
         expected_ext = _FORMAT_EXT[format]
         actual_ext = input_path.suffix.lower()
@@ -368,10 +380,14 @@ def apply_xliff(
             else:
                 raise click.ClickException(f"JSON XLIFF backfill failed: {err_msg}")
         return
+    elif format == "xlsx":
+        from orf.channels.xliff2xlsx import XLIFF2XLSXConverter
+
+        converter = XLIFF2XLSXConverter()
     else:
         raise click.ClickException(
             f"Unsupported format '{format}'\n"
-            f"Hint: Valid formats are: docx, pptx, epub, html, odt, pdf, json\n"
+            f"Hint: Valid formats are: docx, pptx, epub, html, odt, pdf, json, xlsx\n"
             f"       Use --format <format> to specify"
         )
 
