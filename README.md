@@ -373,7 +373,7 @@ orf apply-xliff document.docx --xliff translated/document.xlf --output result.do
 
 ## Validation Master Plan
 
-A comprehensive validation master plan for ORF is available in the Omni Suite docs at `../docs/ORF_VALIDATION_MASTER_PLAN.md`. It covers **14 user questions** across **68 executable scenarios** in AutoInfo-style format:
+A comprehensive validation master plan for ORF is available in the Omni Suite docs at `../docs/ORF_VALIDATION_MASTER_PLAN.md`. It covers **14 user questions** across **68 executable scenarios** in the scenario-per-question format:
 
 | Part | Focus | Questions |
 |------|-------|-----------|
