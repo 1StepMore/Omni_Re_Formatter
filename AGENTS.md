@@ -257,6 +257,10 @@ Key test files:
   (PDF→XLIFF raises). Use MD path.
 - **Cross-format XLIFF** (e.g., DOCX→XLIFF→PPTX): **not implemented.**
   ORF refuses; `--force` is inert. Use the MD path.
+- **`ImageManager` is library-only**: `src/orf/resources/image_manager.py`
+  provides thread-safe MD5 dedup for direct callers that materialize
+  images; the backfill channels rely on pandoc/format-native embedding
+  and do not route through it. Tests and external callers use it directly.
 - **HITL**: ForemanAgent operations on files >100MB, cloud uploads,
   and `MANUAL_INTERVENTION` recovery strategies all require human
   approval before proceeding.
