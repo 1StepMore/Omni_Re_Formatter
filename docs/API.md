@@ -101,7 +101,7 @@ orf apply-xliff INPUT_FILE [OPTIONS]
 | `--xliff`, `-x` | required | Path to the translated XLIFF file |
 | `--xliff-content` | none | Inline XLIFF body (mutually exclusive with `--xliff`) |
 | `--output`, `-o` | required | Output file path |
-| `--format`, `-f` | `docx` | One of: `docx`, `pptx`, `epub`, `html`, `odt` |
+| `--format`, `-f` | `docx` | One of: `docx`, `pptx`, `epub`, `html`, `odt`, `pdf`, `json`, `xlsx`, `eml` |
 | `--images-json` | none | Path to an `images.json` produced by OPP (enables image injection) |
 | `--force` | off | Accepted for backward compatibility; inert. It no longer enables cross-format backfill (see Format validation) |
 | `--no-cache` | off | Skip the ORF content-addressed cache |
@@ -334,7 +334,7 @@ error-recovery enum value, e.g. `ABORT`, `SKIP`, `RETRY`, `FALLBACK`,
 
 ## 3. Supported Output Formats
 
-ORF writes **16** output formats from `apply-md`, plus **5** from `apply-xliff`.
+ORF writes **16** output formats from `apply-md`, plus **9** from `apply-xliff`.
 All `apply-md` formats are listed below with their engine / dependency.
 
 | Format | Engine | Requires | Notes |
@@ -387,11 +387,16 @@ defining `From`, `To`, `Subject`, and `Date`.
 
 ### 3.3 XLIFF backfill formats
 
-`apply-xliff` supports 6 formats: `docx`, `pptx`, `epub`, `html`, `odt`,
-`xlsx`. The XLSX channel needs OPP's `<stem>.skeleton.zip`, whose
-`xliff_map.json` sidecar records which cells were offered for translation;
-only cells marked translatable are written, so formulas, merged-range
-non-anchor cells and numbers survive the round trip.
+`apply-xliff` supports 9 formats: `docx`, `pptx`, `epub`, `html`, `odt`,
+`pdf`, `json`, `xlsx`, `eml`. The XLSX channel needs OPP's
+`<stem>.skeleton.zip`, whose `xliff_map.json` sidecar records which cells were
+offered for translation; only cells marked translatable are written, so
+formulas, merged-range non-anchor cells and numbers survive the round trip.
+The EML channel needs OPP's `<stem>.skeleton.zip` holding the original
+`message.eml` verbatim plus an `eml_map.json` sidecar naming the MIME body part
+(`walk_index` + `unit_ids`); only that part's payload is rewritten, so headers,
+the multipart boundary, the alternative body part and attachments are
+preserved.
 The format must match the source skeleton (extension, plus detected content for
 `.zip` skeletons); cross-format conversion is **not implemented** and `--force`
 does not enable it.

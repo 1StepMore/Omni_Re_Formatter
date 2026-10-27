@@ -18,9 +18,9 @@ _MD_OUTPUT_FORMATS = [
     "srt", "csv", "xlsx", "xml", "ipynb", "eml", "msg", "json",
 ]
 
-# apply-xliff backfill formats
+# 9 apply-xliff backfill formats (must match apply_xliff.py's click.Choice)
 _XLIFF_BACKFILL_FORMATS = [
-    "docx", "pptx", "epub", "html", "odf", "pdf", "json", "xlsx",
+    "docx", "pptx", "epub", "html", "odt", "pdf", "json", "xlsx", "eml",
 ]
 
 # All 7 MCP tools (this one included)
