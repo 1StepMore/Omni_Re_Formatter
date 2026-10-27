@@ -1,7 +1,7 @@
 """orf capabilities — Print ORF module capabilities.
 
 Companion CLI to the ORF MCP get_capabilities tool. Prints the
-16 MD output formats, 7 XLIFF backfill formats, and 7 MCP tool names.
+16 MD output formats, 9 XLIFF backfill formats, and 7 MCP tool names.
 """
 from __future__ import annotations
 

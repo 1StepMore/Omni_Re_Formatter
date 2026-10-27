@@ -49,6 +49,7 @@ _FORMAT_EXT = {
     "pdf": ".pdf",
     "json": ".json",
     "xlsx": ".xlsx",
+    "eml": ".eml",
 }
 
 # Formats whose skeleton OPP may package as `.skeleton.zip`. Membership has two
@@ -58,8 +59,9 @@ _FORMAT_EXT = {
 # e2e-test-suite#92: html joins because OPP packages its HTML skeleton as
 # `.skeleton.zip` (a top-level `index.html` entry) — the same packaging
 # docx/pptx/epub already use. xlsx joins for the same reason: OPP's XLSX
-# skeleton is the workbook plus an `xliff_map.json` sidecar.
-_ZIP_FORMATS = {"docx", "pptx", "epub", "html", "xlsx"}
+# skeleton is the workbook plus an `xliff_map.json` sidecar. eml joins too: its
+# skeleton is the original message plus an `eml_map.json` sidecar.
+_ZIP_FORMATS = {"docx", "pptx", "epub", "html", "xlsx", "eml"}
 
 
 def _cross_format_error(source: str, requested: str) -> str:
@@ -87,7 +89,7 @@ def _cross_format_error(source: str, requested: str) -> str:
     "--format",
     "-f",
     type=click.Choice(
-        ["docx", "pptx", "epub", "html", "odt", "pdf", "json", "xlsx"]
+        ["docx", "pptx", "epub", "html", "odt", "pdf", "json", "xlsx", "eml"]
     ),
     default="docx",
     help="Output format",
@@ -384,10 +386,15 @@ def apply_xliff(
         from orf.channels.xliff2xlsx import XLIFF2XLSXConverter
 
         converter = XLIFF2XLSXConverter()
+    elif format == "eml":
+        from orf.channels.xliff2eml import XLIFF2EMLConverter
+
+        converter = XLIFF2EMLConverter()
     else:
         raise click.ClickException(
             f"Unsupported format '{format}'\n"
-            f"Hint: Valid formats are: docx, pptx, epub, html, odt, pdf, json, xlsx\n"
+            f"Hint: Valid formats are: docx, pptx, epub, html, odt, pdf, json, "
+            f"xlsx, eml\n"
             f"       Use --format <format> to specify"
         )
 

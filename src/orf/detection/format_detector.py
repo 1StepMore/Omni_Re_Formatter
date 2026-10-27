@@ -217,6 +217,15 @@ class FormatDetector:
                 logger.debug("Detected ODT format from skeleton structure")
                 return "ODT"
 
+            # EML: OPP packages the raw message plus an `eml_map.json` sidecar
+            # at the archive root (unlike DOCX/PPTX, the message is not a
+            # format-native zip tree, so the sidecar is the signature). Keep
+            # this after the zip-native formats above so a renamed skeleton
+            # cannot be mistaken for EML.
+            if "message.eml" in namelist and "eml_map.json" in namelist:
+                logger.debug("Detected EML format from skeleton structure")
+                return "EML"
+
             # HTML: index.html or other top-level HTML files
             if any(
                 f.lower().endswith((".html", ".htm")) and "/" not in f

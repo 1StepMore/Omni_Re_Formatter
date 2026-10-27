@@ -92,7 +92,7 @@ src/orf/
 | `detect_format` | Magic-bytes format detection |
 | `info` | Document format + size + resource count + manifest status |
 | `ping` | Health check (returns version) |
-| `get_capabilities` | Return ORF module capabilities: supported MD output formats (16), XLIFF backfill formats (6), input formats, and available MCP tools |
+| `get_capabilities` | Return ORF module capabilities: supported MD output formats (16), XLIFF backfill formats (9), input formats, and available MCP tools |
 
 For full per-tool parameter reference, see this module's [`docs/API.md`](docs/API.md).
 The suite-level [agent-pipeline-guide.md](https://github.com/1StepMore/e2e-test-suite/blob/main/docs/agent-pipeline-guide.md)
@@ -177,8 +177,8 @@ It checks:
 
 The `apply-xliff` and `apply_xliff` channels need a `skeleton.zip`
 alongside the source document. The skeleton preserves the original
-DOCX/PPTX/EPUB/HTML/XLSX ZIP structure so ORF can re-inject translated text
-without re-rendering styles/media.
+DOCX/PPTX/EPUB/HTML/XLSX ZIP structure (and, for EML, the original message)
+so ORF can re-inject translated text without re-rendering styles/media.
 
 **skeleton.zip is produced by OPP** at the same path as the XLIFF.
 It contains:
@@ -195,6 +195,13 @@ backfilled — and it is never handed to openpyxl. A trans-unit's text is one
 row joined by `" | "`, so segment position is cell position; only
 `translatable: true` cells are written, which keeps formulas, merged-range
 non-anchor cells, numbers and blanks untouched.
+
+**EML skeletons** carry the original `message.eml` bytes *plus* an
+`eml_map.json` sidecar naming the MIME body part offered for translation
+(`walk_index`, `content_type`, `unit_ids`, `joiner`). `src/orf/channels/xliff2eml.py`
+rewrites only that part's payload and splices it under the original header
+block; a bare `.eml` cannot be backfilled, and headers, the multipart boundary,
+the alternative body part and attachments are preserved.
 
 **Cross-format XLIFF backfill** (e.g., DOCX XLIFF → PPTX): **not
 implemented.** ORF refuses with a clear error and emits no file. Use

@@ -384,7 +384,8 @@ orf apply-md file.md --auto-detect
 
 **Cause.** The format string is misspelled or not supported. The valid set for
 `apply-md` is: `docx, odt, epub, html, rtf, pdf, pptx, csv, json, xlsx, xml,
-ipynb, eml, msg, icml, srt`. For `apply-xliff`: `docx, pptx, epub, html, odt`.
+ipynb, eml, msg, icml, srt`. For `apply-xliff`: `docx, pptx, epub, html, odt,
+pdf, json, xlsx, eml`.
 
 **Fix.** Use one of the valid strings:
 
