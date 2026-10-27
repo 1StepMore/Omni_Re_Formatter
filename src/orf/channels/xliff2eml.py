@@ -320,11 +320,12 @@ def _map_paragraphs_v1(
     untranslated = 0
     for index, original in enumerate(paragraphs):
         unit = units.get(body.unit_ids[index])
-        if unit is None or unit[0] is None or unit[1] is None:
+        source = unit[0] if unit is not None else None
+        target = unit[1] if unit is not None else None
+        if source is None or target is None:
             new_paragraphs.append(original)
             untranslated += 1
             continue
-        source, target = unit
         source_lf = source.replace("\r\n", "\n").replace("\r", "\n")
         if not source_lf:
             new_paragraphs.append(original)
@@ -612,7 +613,7 @@ class XLIFF2EMLConverter(BaseConverter):
             # header it just gained sits inside the block orig_head locks.
             rebuild_headers = True
 
-        if rebuild_headers:
+        if rebuild_headers or orig_head is None:
             output_bytes = serialized
             warnings.append(WarningDetail(
                 code="HEADERS_REBUILT",
