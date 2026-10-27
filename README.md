@@ -62,6 +62,7 @@ this module".
 
 - **pandoc path**: MD→{DOCX, ODT, EPUB, RTF, ICML} requires `pandoc` (provided automatically by `pypandoc-binary` when `pip install omni-re-formatter` is run).
 - **Pure Python path**: MD→HTML and MD→PDF (weasyprint engine) do not depend on pandoc; they use the `markdown` library + WeasyPrint.
+- **MD→PPTX**: uses the `md2pptx` CLI ([MartinPacker/md2pptx](https://github.com/MartinPacker/md2pptx)) — a **Python 3 script**, not a pip package and not a prebuilt release binary. Clone the repo and `chmod +x md2pptx`; keep the directory beside its helper modules (`funnel.py`, `paragraph.py`, …). Requires Python 3 + `python-pptx>=1.0` (`pip install 'python-pptx>=1.0'`); inline math additionally needs `latex2mathml` + `lxml`. ORF runs it as `md2pptx INPUT.md OUTPUT.pptx` and falls back to pandoc when it is missing.
 - **XLIFF cross-format**: not supported. `apply-xliff` is format-preserving; a cross-format request (e.g. DOCX XLIFF -> PPTX) fails with a "not implemented" error. `--force` is still accepted but inert. Use `apply-md` for cross-format output.
 - **Email format**: MD→MSG auto-generates default headers when `email_headers` frontmatter is missing, no longer hard-failing.
 - **MD→MSG format**: requires `aspose-email-foss` (GPLv3 open-source fork) — `pip install 'omni-re-formatter[email-output]'`.

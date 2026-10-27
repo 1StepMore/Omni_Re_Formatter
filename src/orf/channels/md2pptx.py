@@ -21,9 +21,9 @@ _CONVERSION_TIMEOUT = int(os.environ.get("ORF_CONVERSION_TIMEOUT", "300"))
 
 _TIP_MD2PPTX_FALLBACK = (
     "💡 Tip: For higher-quality PPTX output, install md2pptx:\n"
-    "   dotnet tool install --global md2pptx\n"
-    "   (or download a release binary from "
-    "https://github.com/MartinPacker/md2pptx/releases)\n"
+    "   git clone https://github.com/MartinPacker/md2pptx.git\n"
+    "   chmod +x md2pptx/md2pptx   # keep the directory beside its helper modules\n"
+    "   Requires Python 3 + python-pptx>=1.0 (optional: latex2mathml + lxml for inline math).\n"
     "   Otherwise, ORF will use the pandoc fallback which produces "
     "lower-quality output."
 )
@@ -38,19 +38,25 @@ def _show_md2pptx_tip_once(logger_inst: Logger) -> None:
 
 
 def _md2pptx_install_hint() -> str:
-    """Return an install hint for the md2pptx binary.
+    """Return an install hint for the md2pptx script.
 
-    md2pptx is a .NET tool, not a pip package.
+    md2pptx (MartinPacker/md2pptx) is a Python 3 script, not a pip package
+    and not a prebuilt binary. It imports helper modules (funnel.py,
+    paragraph.py, …) from its own directory, so the clone must stay intact
+    and be run in place.
     """
     return (
-        "md2pptx binary not found in PATH. md2pptx is a .NET tool, not a "
-        "pip package. Install one of:\n"
-        "  - .NET SDK + 'dotnet tool install --global md2pptx'\n"
-        "  - Or download a release binary from "
-        "https://github.com/MartinPacker/md2pptx/releases and place it "
-        "on PATH (e.g. /usr/local/bin/md2pptx)\n"
-        "  - Or use the 'pandoc' backend (--target-format pptx via pandoc) "
-        "as a fallback."
+        "md2pptx not found in PATH. md2pptx is a Python 3 script "
+        "(MartinPacker/md2pptx), not a pip package. Install it with:\n"
+        "  git clone https://github.com/MartinPacker/md2pptx.git\n"
+        "  chmod +x md2pptx/md2pptx\n"
+        "  export PATH=\"$PWD/md2pptx:$PATH\"   "
+        "# keep the clone directory beside its helper modules\n"
+        "Requirements: Python 3 + python-pptx>=1.0 "
+        "(`pip install 'python-pptx>=1.0'`); inline math additionally needs "
+        "`latex2mathml` + `lxml`.\n"
+        "ORF invokes it as: md2pptx INPUT.md OUTPUT.pptx\n"
+        "Alternative: use the pandoc fallback for lower-fidelity output."
     )
 
 

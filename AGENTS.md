@@ -108,7 +108,7 @@ covers server/tool inventory and namespacing.
 | HTML | `markdown` lib (pure Python) | No pandoc needed. |
 | RTF | pandoc | Same. |
 | PDF | `weasyprint` (`[weasyprint]` extra) | Falls back to pandoc if available. |
-| PPTX | **`md2pptx` CLI** (E2E-79) | .NET tool, NOT a pip package. Requires `dotnet tool install --global md2pptx` OR a release binary on PATH. ORF falls back to pandoc automatically if md2pptx is missing and pandoc is available; errors with an actionable install hint only when both are missing. |
+| PPTX | **`md2pptx` CLI** (E2E-79) | `md2pptx` (E2E-79) is a **Python 3 script** ([MartinPacker/md2pptx](https://github.com/MartinPacker/md2pptx)), NOT a pip package and NOT a prebuilt release binary. Clone the repo and `chmod +x md2pptx`; its directory must stay beside its helper modules (`funnel.py`, `paragraph.py`, …). Requires Python 3 + `python-pptx>=1.0`; inline math also needs `latex2mathml` + `lxml`. ORF invokes it as `md2pptx INPUT.md OUTPUT.pptx`. ORF falls back to pandoc automatically if md2pptx is missing and pandoc is available; errors with an actionable install hint only when both are missing. |
 | ICML | pandoc | Same. |
 | SRT | `srt` lib | Subtitle format. |
 | CSV | pandas | Pure Python. |
@@ -254,10 +254,17 @@ Key test files:
 - **E2E-07**: XLIFF→DOCX inline image dedup. The cx/cy match is
   document-wide (not paragraph-local) because OPP's
   `paragraph_index` is off-by-one vs ORF's `//w:p` enumeration.
-- **E2E-79**: `md2pptx` is a .NET tool, not a pip package. Install
-  with `dotnet tool install --global md2pptx` or download a release
-  binary. ORF pre-flight checks for the binary and returns an
-  actionable install hint if missing.
+- **E2E-79**: `md2pptx` is a **Python 3 script**
+  ([MartinPacker/md2pptx](https://github.com/MartinPacker/md2pptx)), not a
+  pip package and not a prebuilt release binary. Clone the repo and
+  `chmod +x md2pptx`; keep the directory beside its helper modules
+  (`funnel.py`, `paragraph.py`, …). Requires Python 3 + `python-pptx>=1.0`
+  (`pip install 'python-pptx>=1.0'`); inline math also needs
+  `latex2mathml` + `lxml`. ORF pre-flight checks for the script on PATH,
+  runs it as `md2pptx INPUT.md OUTPUT.pptx`, and returns an actionable
+  install hint if missing (with pandoc as the automatic fallback).
+  The suite helper `scripts/install_md2pptx.sh` (in the e2e-test-suite repo)
+  automates the clone + link and proves the install with a real conversion.
 - **MSG output**: requires commercial `aspose-email-foss` (GPLv3
   fork). ORF recommends `.eml` for open-source compatibility.
 - **PDF XLIFF input** is intentionally **not** supported by OPP

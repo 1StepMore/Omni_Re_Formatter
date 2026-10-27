@@ -89,7 +89,8 @@
   the documented happy path → patch bump). Frozen schema fixture
   `tests/contract/fixtures/orf_mcp_schemas.json` regenerated to reflect the
   new state.
-- **E2E-79** (`src/orf/channels/md2pptx.py`): `MD2PPTXConverter.convert()` called `subprocess.run(['md2pptx', ...])` without checking whether the binary exists. On any Linux box without the .NET SDK (and no `/usr/local/bin/md2pptx`), the call raised `FileNotFoundError` which was caught and surfaced as the unhelpful `'md2pptx not installed or not in PATH'`. Users had no way to know that `md2pptx` is a .NET tool (NOT a pip package). Fix: pre-flight `shutil.which('md2pptx')` check that fails fast with a clear, platform-aware install hint covering the three known install paths (`.NET SDK + 'dotnet tool install --global md2pptx'`, GitHub release binary on PATH, or pandoc fallback). Rare-race `FileNotFoundError` handler with the same hint.
+- **E2E-79** (`src/orf/channels/md2pptx.py`): `MD2PPTXConverter.convert()` called `subprocess.run(['md2pptx', ...])` without checking whether the script exists. On a machine without `md2pptx` on PATH the call raised `FileNotFoundError` which was caught and surfaced as the unhelpful `'md2pptx not installed or not in PATH'`. Fix: pre-flight `shutil.which('md2pptx')` check that fails fast with a clear, actionable install hint (clone `MartinPacker/md2pptx`, `chmod +x`, keep its helper modules alongside; or pandoc fallback). A rare-race `FileNotFoundError` handler carries the same hint.
+  *Correction (2026-10-27, e2e-test-suite#226):* the original entry wrongly described `md2pptx` as a compiled tool installed from a package registry and pointed at release binaries. That is false — `md2pptx` is a Python 3 script requiring `python-pptx>=1.0`, run as `md2pptx INPUT.md OUTPUT.pptx`. The hint text and docs were corrected; the invocation contract is unchanged.
 
 ### 🛠️ 修复 / Fixed
 

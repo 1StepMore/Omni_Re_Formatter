@@ -1,16 +1,19 @@
 """E2E-79 regression tests.
 
 The bug: MD2PPTXConverter.convert() called ``subprocess.run(['md2pptx', ...])``
-without a pre-flight check. On a typical Linux box (no .NET SDK,
-no /usr/local/bin/md2pptx) the binary is missing and subprocess
-raised FileNotFoundError, which was caught and returned the
-unhelpful error message 'md2pptx not installed or not in PATH'.
-The user had no idea md2pptx is a .NET tool that needs a separate
-install, so they hit a wall.
+without a pre-flight check. On a typical Linux box (no md2pptx on
+PATH) the script is missing and subprocess raised FileNotFoundError,
+which was caught and returned the unhelpful error message
+'md2pptx not installed or not in PATH'. The user had no idea md2pptx
+is a Python 3 script that needs a separate install, so they hit a wall.
 
 The fix: pre-flight ``shutil.which('md2pptx')`` check that fails
-fast with an actionable install hint covering the three known paths
-(.NET SDK tool, GitHub release binary, or pandoc fallback).
+fast with an actionable install hint (clone MartinPacker/md2pptx,
+chmod +x, keep its helper modules alongside; or pandoc fallback).
+
+e2e-test-suite#226: the hint used to wrongly claim md2pptx was a
+compiled package-instantiated tool. It is a Python 3 script requiring
+python-pptx>=1.0, invoked as ``md2pptx INPUT.md OUTPUT.pptx``.
 
 ORF#7 update: when md2pptx is missing but pandoc IS available,
 the converter now falls back to pandoc automatically (success=True
@@ -42,9 +45,14 @@ def output_path(tmp_path: Path) -> Path:
 
 
 class TestMd2PptxInstallHint:
-    def test_hint_mentions_dotnet(self):
+    def test_hint_describes_python_install(self):
+        """e2e-test-suite#226: md2pptx is a Python 3 script, not a
+        package-manager tool. The hint must say how to really install it.
+        """
         hint = _md2pptx_install_hint()
-        assert "dotnet" in hint
+        assert "python-pptx" in hint
+        assert "git clone" in hint
+        assert "dotnet" not in hint
 
     def test_hint_mentions_github_releases(self):
         hint = _md2pptx_install_hint()
@@ -70,7 +78,7 @@ class TestMd2PptxPreFlight:
         err = result.errors[0]
         err_str = getattr(err, "message", None) or str(err)
         assert "md2pptx" in err_str
-        assert "dotnet" in err_str or "github.com" in err_str
+        assert "python-pptx" in err_str or "github.com" in err_str
         assert not output_path.exists(), (
             f"Output file must not be created on failure. "
             f"Exists: {output_path}"
