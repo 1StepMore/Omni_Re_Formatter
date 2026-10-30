@@ -161,7 +161,12 @@ def apply_xliff(
         if images_data:
             fd, temp_path = tempfile.mkstemp(suffix=".json", prefix="orf_images_")
             try:
-                os.write(fd, json.dumps(images_data).encode("utf-8"))
+                # Canonical cross-repo shape (e2e-test-suite#223 P2.2): OPP's
+                # images.json and the apply_md MCP tool both write
+                # {"images": [...]}; the bare list was this tool's outlier.
+                # Both ORF CLI readers dual-read (wrapped + legacy bare list),
+                # so this stays backward-compatible for every in-tree consumer.
+                os.write(fd, json.dumps({"images": images_data}).encode("utf-8"))
                 os.close(fd)
                 args.extend(["--images-json", temp_path])
                 temp_created = True
