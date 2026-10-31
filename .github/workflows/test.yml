@@ -98,6 +98,17 @@ jobs:
           exit_status=$?
           exit ${exit_status}
 
+      # Doc-truth gate (ORF#73): README/AGENTS claims must match the values
+      # derived from source (7 tools from _TOOL_DISPATCH, 16 MD outputs, 9
+      # XLIFF backfills, scenarios, version), referenced paths must resolve,
+      # and docs/dev/doc-inventory.md must be fresh. exit 1 = doc drift.
+      # MCP_ALLOWED_DIRECTORIES is fail-closed at orf.mcp import; the audit
+      # only reads the tool registry, so the placeholder value is inert.
+      - name: Doc inventory (--check)
+        env:
+          MCP_ALLOWED_DIRECTORIES: /tmp
+        run: python scripts/doc_inventory.py --check
+
       # Full pytest output survives even when the test step fails and the
       # job goes red - it stays downloadable regardless of the verdict.
       - name: Upload pytest logs (full, untruncated)
