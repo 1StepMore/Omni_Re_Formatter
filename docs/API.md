@@ -120,7 +120,7 @@ Cross-format backfill (e.g. DOCX skeleton -> PPTX output) is **not implemented**
 **Image injection.** When `--images-json` is provided and the format is DOCX, ORF
 calls `converter.inject_images(...)` to re-insert images at the original paragraph
 index. Inline duplicates are deduped document-wide via
-`<wp:extent>` cx/cy match (`src/orf/channels/xliff2docx.py`, see CHANGELOG v0.4.3).
+`<wp:extent>` cx/cy match (`src/orf/channels/xliff2docx/`, see CHANGELOG v0.4.3).
 
 **Example.**
 
