@@ -18,4 +18,5 @@
 | docs/adr/TEMPLATE.md | 29 |
 | docs/dev/converters.md | 51 |
 | docs/dev/mcp-security.md | 107 |
+| docs/dev/production-matrix.md | 58 |
 | docs/dev/xliff-backfill.md | 33 |
