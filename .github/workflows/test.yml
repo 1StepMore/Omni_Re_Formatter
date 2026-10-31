@@ -109,6 +109,13 @@ jobs:
           MCP_ALLOWED_DIRECTORIES: /tmp
         run: python scripts/doc_inventory.py --check
 
+      # Production matrix gate (ORF#74): docs/dev/production-matrix.md rows
+      # must stay in sync with the source-derived format/tool sets.
+      - name: Coverage matrix (--check)
+        env:
+          MCP_ALLOWED_DIRECTORIES: /tmp
+        run: python scripts/coverage_matrix.py --check
+
       # Full pytest output survives even when the test step fails and the
       # job goes red - it stays downloadable regardless of the verdict.
       - name: Upload pytest logs (full, untruncated)
