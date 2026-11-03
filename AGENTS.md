@@ -55,7 +55,10 @@ Full annotated tree: `docs/ARCHITECTURE.md`.
 | `apply_md` | Convert MD to target format (16 outputs). Accepts **inline content** via `content` (E2E-76) OR path via `input_md`. |
 | `apply_xliff` | Backfill XLIFF into source DOCX/PPTX/EPUB. Requires skeleton.zip alongside the source (from OPP). |
 | `get_capabilities` | Return ORF module capabilities: MD output formats (16), XLIFF backfill formats (9), input formats, available MCP tools |
-| … | `batch_convert`, `detect_format`, `info`, `ping` |
+| `batch_convert` | Convert every frontmatter-bearing MD file in a directory. Delegates to `orf convert-batch`. |
+| `detect_format` | Magic-bytes format detection. Delegates to `orf info`. |
+| `info` | Document information. Delegates to `orf info`. |
+| `ping` | Health check. |
 
 Full per-tool parameter reference: [`docs/API.md`](docs/API.md).
 Suite-level inventory: `docs/agent-pipeline-guide.md` in the suite repo.
