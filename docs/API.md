@@ -310,7 +310,7 @@ Schema source: `src/orf/mcp/server.py:692`.
 
 #### 2.2.6 `ping`
 
-Health check. Returns: `{"success": true, "module": "orf", "version": "0.4.17"}`.
+Health check. Returns: `{"success": true, "module": "orf", "version": "0.5.0"}`.
 Schema source: `src/orf/mcp/server.py:706`.
 
 ### 2.3 Error codes
