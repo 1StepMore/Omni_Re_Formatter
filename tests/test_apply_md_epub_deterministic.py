@@ -113,12 +113,17 @@ def test_identifier_is_content_derived_uuid5(
 
     assert _invoke_apply_md_epub(runner, md, epub_path).exit_code == 0
     with zipfile.ZipFile(epub_path) as z:
-        opf = next(n for n in z.namelist() if n.endswith(".opf"))
-        opf_text = z.read(opf).decode("utf-8", "ignore")
+        # Locate the OPF the spec way — via META-INF/container.xml — instead
+        # of guessing its path/name (pandoc versions moved it around; a
+        # runner with a different pandoc wrote no *.opf-suffixed entry).
+        container = z.read("META-INF/container.xml").decode("utf-8", "ignore")
+        m = re.search(r'full-path="([^"]+)"', container)
+        assert m, f"container.xml names no rootfile: {container[:200]}"
+        opf_text = z.read(m.group(1)).decode("utf-8", "ignore")
     identifiers = re.findall(
         r"<dc:identifier[^>]*>([^<]+)</dc:identifier>", opf_text
     )
-    assert identifiers, f"no dc:identifier in {opf}"
+    assert identifiers, f"no dc:identifier in {m.group(1)}"
     digest = hashlib.sha256(md.read_bytes()).hexdigest()
     want = str(uuid.uuid5(uuid.NAMESPACE_URL, f"urn:orf:epub:{digest}"))
     assert any(want in i for i in identifiers), (
