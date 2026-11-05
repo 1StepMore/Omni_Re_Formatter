@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import subprocess
+import uuid
 from pathlib import Path
 from typing import Any, Optional
 
@@ -16,6 +18,37 @@ from orf.converters.options import ConverterOptions
 logger = get_logger("channel.md2epub")
 
 _CONVERSION_TIMEOUT = int(os.environ.get("ORF_CONVERSION_TIMEOUT", "300"))
+
+
+def _deterministic_pandoc_env(source_path: Path) -> dict[str, str]:
+    """Env for pandoc with SOURCE_DATE_EPOCH derived from the input bytes.
+
+    Pandoc stamps EPUB metadata (``dcterms:modified``, the ``dc:date``
+    fallback) and every zip member with the wall clock, so two runs of the
+    same conversion produced different EPUB bytes. Unlike the DOCX
+    channel's mtime-based pin (``md2docx._deterministic_pandoc_env``), the
+    epoch derives from the INPUT CONTENT: apply-md stages every conversion
+    through a fresh temp sibling whose mtime changes per run, so an
+    mtime-derived pin would break cross-directory reproducibility.
+    """
+    env = dict(os.environ)
+    try:
+        digest = hashlib.sha256(source_path.read_bytes()).hexdigest()
+        env["SOURCE_DATE_EPOCH"] = str(int(digest[:8], 16) % (2**31 - 1))
+    except OSError:
+        pass
+    return env
+
+
+def _stable_identifier(source_path: Path) -> str:
+    """Content-derived UUID for the EPUB ``dc:identifier`` / ``dtb:uid``.
+
+    Without identifier metadata pandoc generates a fresh random UUID per
+    run (its EPUB writer calls getRandomUUID) — SOURCE_DATE_EPOCH cannot
+    pin that. A uuid5 over the input bytes is stable for identical inputs.
+    """
+    digest = hashlib.sha256(source_path.read_bytes()).hexdigest()
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"urn:orf:epub:{digest}"))
 
 
 class MD2EPUBConverter(BaseConverter):
@@ -85,6 +118,11 @@ class MD2EPUBConverter(BaseConverter):
             cmd.append("--toc")
         if opts.embed_images:
             cmd.append("--self-contained")
+        # Deterministic EPUB (#P1-A): replace pandoc's per-run random UUID
+        # with a content-derived identifier, so identical inputs produce
+        # byte-identical EPUBs. (Wall-clock stamps are pinned separately via
+        # SOURCE_DATE_EPOCH on the subprocess env below.)
+        cmd.extend(["--metadata", f"identifier={_stable_identifier(input_path)}"])
 
         try:
             logger.info(f"Running: {' '.join(cmd)}")
@@ -96,6 +134,7 @@ class MD2EPUBConverter(BaseConverter):
                 check=True,
                 cwd=str(input_path.parent),
                 timeout=_CONVERSION_TIMEOUT,
+                env=_deterministic_pandoc_env(input_path),
             )
 
             return ConversionResult(
