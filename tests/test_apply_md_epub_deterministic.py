@@ -23,6 +23,7 @@ identifier.
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 import shutil
 import uuid
@@ -36,8 +37,12 @@ from click.testing import CliRunner
 from orf.cli import main
 
 pytestmark = pytest.mark.skipif(
-    shutil.which("pandoc") is None,
-    reason="apply-md EPUB conversion requires the pandoc binary",
+    shutil.which("pandoc") is None or os.environ.get("OMNI_TEST_FAKE_PANDOC") == "1",
+    reason=(
+        "EPUB determinism asserts the REAL pandoc writer (uuid5 dc:identifier, "
+        "SOURCE_DATE_EPOCH stamps); the fake-pandoc stub cannot carry either, "
+        "and per STANDARDS.md a fallback-active run is never evidence anyway"
+    ),
 )
 
 _VALID_MD = (
