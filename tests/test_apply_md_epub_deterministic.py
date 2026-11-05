@@ -78,8 +78,12 @@ def test_two_runs_in_different_dirs_produce_identical_epub(
     md = tmp_path / "doc.md"
     md.write_text(_VALID_MD, encoding="utf-8")
 
-    epub_a = tmp_path / "run_a" / "result.epub"
-    epub_b = tmp_path / "run_b" / "result.epub"
+    out_a = tmp_path / "run_a"
+    out_b = tmp_path / "run_b"
+    out_a.mkdir()
+    out_b.mkdir()
+    epub_a = out_a / "result.epub"
+    epub_b = out_b / "result.epub"
 
     first = _invoke_apply_md_epub(runner, md, epub_a)
     assert first.exit_code == 0, first.output
