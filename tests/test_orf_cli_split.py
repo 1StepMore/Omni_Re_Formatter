@@ -8,14 +8,26 @@ Verifies that:
 
 from __future__ import annotations
 
-from click.testing import CliRunner
+import subprocess
+
 import pytest
+from click.testing import CliRunner
 
 from orf.cli import main
 
-# Use OMNI_TEST_FAKE_PANDOC to avoid pandoc dependency in tests
-import os
-os.environ.setdefault("OMNI_TEST_FAKE_PANDOC", "1")
+
+@pytest.fixture(autouse=True)
+def _fake_pandoc(monkeypatch: pytest.MonkeyPatch):
+    """Use the fake-pandoc seam without leaking into later test modules.
+
+    A module-level ``os.environ.setdefault`` used to pollute every test
+    collected afterwards, and the CLI seam patches ``subprocess.run`` without
+    ever undoing it — scope both to this module's tests (ORF#81).
+    """
+    real_run = subprocess.run
+    monkeypatch.setenv("OMNI_TEST_FAKE_PANDOC", "1")
+    yield
+    subprocess.run = real_run
 
 
 @pytest.fixture
