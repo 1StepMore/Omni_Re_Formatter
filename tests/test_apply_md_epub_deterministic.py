@@ -36,14 +36,21 @@ from click.testing import CliRunner
 
 from orf.cli import main
 
-pytestmark = pytest.mark.skipif(
-    shutil.which("pandoc") is None or os.environ.get("OMNI_TEST_FAKE_PANDOC") == "1",
-    reason=(
-        "EPUB determinism asserts the REAL pandoc writer (uuid5 dc:identifier, "
-        "SOURCE_DATE_EPOCH stamps); the fake-pandoc stub cannot carry either, "
-        "and per STANDARDS.md a fallback-active run is never evidence anyway"
-    ),
-)
+
+def _skip_unless_real_pandoc() -> None:
+    """Skip at RUNTIME — another module's import may enable the fake seam first.
+
+    A module-level ``pytestmark`` evaluated this at collection time, before
+    ORF's other test modules set ``OMNI_TEST_FAKE_PANDOC``; the decision must
+    happen when the test runs (ORF#81).
+    """
+    if shutil.which("pandoc") is None or os.environ.get("OMNI_TEST_FAKE_PANDOC") == "1":
+        pytest.skip(
+            "EPUB determinism asserts the REAL pandoc writer (uuid5 dc:identifier, "
+            "SOURCE_DATE_EPOCH stamps); the fake-pandoc stub cannot carry either, "
+            "and per STANDARDS.md a fallback-active run is never evidence anyway"
+        )
+
 
 _VALID_MD = (
     "---\nsource_lang: en\ntarget_lang: zh\n---\n\n"
@@ -79,6 +86,7 @@ def test_two_runs_in_different_dirs_produce_identical_epub(
     runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Same input, fresh staging dirs -> byte-identical EPUB bytes."""
+    _skip_unless_real_pandoc()
     monkeypatch.setenv("OMNI_CACHE_DIR", str(tmp_path / "cache"))
     md = tmp_path / "doc.md"
     md.write_text(_VALID_MD, encoding="utf-8")
@@ -106,6 +114,7 @@ def test_identifier_is_content_derived_uuid5(
     runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """dc:identifier must be the content-derived uuid5, stable per input."""
+    _skip_unless_real_pandoc()
     monkeypatch.setenv("OMNI_CACHE_DIR", str(tmp_path / "cache"))
     md = tmp_path / "doc.md"
     md.write_text(_VALID_MD, encoding="utf-8")
