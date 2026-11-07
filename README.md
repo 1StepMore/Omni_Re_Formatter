@@ -239,7 +239,7 @@ All operations are logged to `logs/audit_{date}.log`, each entry containing:
 
 XLIFF→DOCX backfill now skips inline drawings that are already in the skeleton. Without this check, ORF re-injected 2 inline duplicates of the first 2 source images (IM 16, 组合 116) in the Haier DOCX — output had 13 `<w:drawing>` blocks instead of the source's 11. The floating-image path already had a similar dedup (positionH/V match); the inline path now mirrors it via document-wide `<wp:extent>` cx/cy match. Document-wide (not paragraph-local) is required because OPP's `paragraph_index` is off-by-one vs. ORF's `//w:p` enumeration.
 
-Locked in by `tests/turnkey/test_image_fidelity.py::test_drawing_count_equals_source` (regression guard).
+Locked in by `suite:tests/turnkey/test_image_fidelity.py::test_drawing_count_equals_source` (regression guard).
 
 ## Recent additions (v0.4.0)
 
