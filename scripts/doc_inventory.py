@@ -256,6 +256,149 @@ def _check_referential_paths(failures: list[str]) -> dict[str, int]:
     return skipped
 # ── END SHARED CROSS-REPO RESOLUTION (e2e-test-suite#253) ────────────────────
 
+# ── BEGIN SHARED GOVERNANCE CHECKS (agent-governance 2026-11-08) ─────────────
+# Byte-identical in all four copies (suite + OPP/OL/ORF); parity is enforced by
+# the suite test tests/test_doc_inventory_copy_parity.py. Change rule: edit
+# every checked-out copy byte for byte, then re-run each repo's --check gate.
+# Each copy's call site passes its own scope OUTSIDE this block so the block
+# itself needs no per-repo knowledge.
+GOV_AGENTS_LINE_CAP = 200
+GOV_ROLE_LINE_CAP = 30
+GOV_ROLE_SECTIONS = (
+    "## Done",
+    "## 返回格式",
+    "## 工具与来源指引",
+    "## 任务边界与禁止触碰",
+    "## Stop & Escalate",
+)
+_GOV_PLACEHOLDER_RE = re.compile(r"(?<!\$)\{\{[^{}]{1,120}\}\}")
+_GOV_ANCHOR_DEF_RE = re.compile(r"\{#([A-Za-z0-9_-]+)\}")
+_GOV_ANCHOR_REF_RE = re.compile(r"#([A-Za-z0-9_-]+)")
+
+
+def gov_agents_line_cap(root: Path, failures: list[str]) -> None:
+    """C3: the repo root AGENTS.md must stay within the line cap."""
+    path = root / "AGENTS.md"
+    if not path.is_file():
+        return
+    count = len(path.read_text(encoding="utf-8").splitlines())
+    if count > GOV_AGENTS_LINE_CAP:
+        failures.append(f"AGENTS.md: {count} lines > cap {GOV_AGENTS_LINE_CAP} (C3)")
+
+
+def gov_no_placeholders(root: Path, rel: str, failures: list[str]) -> None:
+    """C5: backfilled files must not carry leftover {{placeholder}} tokens."""
+    path = root / rel
+    if not path.is_file():
+        return
+    for lineno, line in enumerate(
+        path.read_text(encoding="utf-8").splitlines(), start=1
+    ):
+        match = _GOV_PLACEHOLDER_RE.search(line)
+        if match:
+            failures.append(
+                f"{rel}:{lineno}: leftover placeholder {match.group(0)} (C5)"
+            )
+
+
+def gov_role_contracts(root: Path, failures: list[str]) -> None:
+    """C4: each .agents/roles/*.md carries every required section with a
+    non-empty body, within the line cap. Pointer-model repos without the
+    directory skip silently."""
+    roles_dir = root / ".agents" / "roles"
+    if not roles_dir.is_dir():
+        return
+    for path in sorted(roles_dir.glob("*.md")):
+        if path.name.lower() == "readme.md":
+            continue
+        rel = path.relative_to(root).as_posix()
+        lines = path.read_text(encoding="utf-8").splitlines()
+        if len(lines) > GOV_ROLE_LINE_CAP:
+            failures.append(
+                f"{rel}: {len(lines)} lines > cap {GOV_ROLE_LINE_CAP} (C4)"
+            )
+        for heading in GOV_ROLE_SECTIONS:
+            start = next(
+                (
+                    i
+                    for i, line in enumerate(lines)
+                    if line.strip().startswith(heading)
+                ),
+                None,
+            )
+            if start is None:
+                failures.append(f"{rel}: missing required section `{heading}` (C4)")
+                continue
+            body: list[str] = []
+            for line in lines[start + 1:]:
+                if line.strip().startswith("## "):
+                    break
+                if line.strip():
+                    body.append(line)
+            if not body:
+                failures.append(f"{rel}: empty section `{heading}` (C4)")
+
+
+def gov_expectations_mapping(root: Path, failures: list[str]) -> None:
+    """C7: .agents/expectations/INDEX.md anchor references must resolve in
+    scenarios/STANDARDS.md. Repos without the mapping layer skip silently."""
+    index = root / ".agents" / "expectations" / "INDEX.md"
+    standards = root / "scenarios" / "STANDARDS.md"
+    if not index.is_file():
+        return
+    if not standards.is_file():
+        failures.append(
+            ".agents/expectations/INDEX.md: scenarios/STANDARDS.md missing (C7)"
+        )
+        return
+    anchors = set(_GOV_ANCHOR_DEF_RE.findall(standards.read_text(encoding="utf-8")))
+    for lineno, line in enumerate(
+        index.read_text(encoding="utf-8").splitlines(), start=1
+    ):
+        if "STANDARDS.md" not in line:
+            continue
+        for anchor in _GOV_ANCHOR_REF_RE.findall(line):
+            if anchor not in anchors:
+                failures.append(
+                    f".agents/expectations/INDEX.md:{lineno}: anchor #{anchor} "
+                    "not found in scenarios/STANDARDS.md (C7)"
+                )
+
+
+def gov_role_pointer(root: Path, failures: list[str]) -> None:
+    """A2 pointer model: when the suite checkout (with .agents/roles/) is the
+    parent of this checkout, this repo's AGENTS.md must route to it.
+    Standalone clones without a suite parent skip silently."""
+    if not (root.parent / ".agents" / "roles" / "coder.md").is_file():
+        return
+    agents = root / "AGENTS.md"
+    text = agents.read_text(encoding="utf-8") if agents.is_file() else ""
+    if ".agents/roles/" not in text:
+        failures.append(
+            "AGENTS.md: suite role contracts detected at ../.agents/roles/ but "
+            "no routing pointer present (A2/C4)"
+        )
+
+
+def gov_checks(
+    root: Path,
+    failures: list[str],
+    *,
+    placeholder_files: tuple[str, ...] = (),
+    check_roles: bool = False,
+    check_expectations: bool = False,
+) -> None:
+    """C3/C4/C5/C7 entry point; see the block header for the change rule."""
+    gov_agents_line_cap(root, failures)
+    for rel in placeholder_files:
+        gov_no_placeholders(root, rel, failures)
+    if check_roles:
+        gov_role_contracts(root, failures)
+    if check_expectations:
+        gov_expectations_mapping(root, failures)
+# ── END SHARED GOVERNANCE CHECKS (agent-governance 2026-11-08) ───────────────
+
+
 
 def _check_claims(failures: list[str]) -> None:
     for rel, pattern, group, derive in _CLAIM_SITES:
@@ -323,6 +466,15 @@ def check() -> int:
     failures: list[str] = []
     _check_claims(failures)
     skipped = _check_referential_paths(failures)
+
+    gov_checks(
+        ROOT,
+        failures,
+        placeholder_files=("AGENTS.md",),
+        check_roles=False,
+        check_expectations=False,
+    )
+    gov_role_pointer(ROOT, failures)
 
     if INVENTORY_PATH.is_file():
         if INVENTORY_PATH.read_text(encoding="utf-8") != generate():
