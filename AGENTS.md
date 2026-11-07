@@ -61,7 +61,7 @@ Full annotated tree: `docs/ARCHITECTURE.md`.
 | `ping` | Health check. |
 
 Full per-tool parameter reference: [`docs/API.md`](docs/API.md).
-Suite-level inventory: `docs/agent-pipeline-guide.md` in the suite repo.
+Suite-level inventory: `suite:docs/agent-pipeline-guide.md` in the suite repo.
 
 ## Channels — the one decision that matters most
 
@@ -105,7 +105,7 @@ Test markers: `unit`, `integration`, `e2e` (registered in
 `pyproject.toml`). Coverage target ≥90%. Key regression files:
 `tests/test_orf_mcp_server.py` (MCP integration),
 `tests/test_mcp_apply_md_xliff_parity.py` (CLI/MCP parity),
-`tests/turnkey/test_image_fidelity.py` (E2E-07 image dedup).
+`suite:tests/turnkey/test_image_fidelity.py` (E2E-07 image dedup).
 
 ## Known issues / gotchas
 
@@ -127,6 +127,16 @@ hit most:
 - Compatibility matrix: [COMPATIBILITY.md](https://github.com/1StepMore/e2e-test-suite/blob/main/COMPATIBILITY.md)
 - Dev skill: `.opencode/skills/orf-dev/SKILL.md` (add channels/formats,
   touch PathValidator policy)
+
+## Issue conventions
+
+- **`pinned` = 常开索引件, not a to-do.** A pinned issue stays open as a
+  roadmap pointer; do not close it, and do not consume it as a work item.
+- **Cross-repo reference check.** `scripts/doc_inventory.py` verifies
+  backticked paths in `README.md` / `AGENTS.md`. Write another repo's path
+  with a `suite:` / `opp:` / `ol:` / `orf:` prefix; an unprefixed path must
+  exist in this repo. The checker's shared block is byte-identical across the
+  three module repos — change rule: `suite:docs/dev/doc-inventory-copies.md`.
 
 ## How to validate this module
 
@@ -158,8 +168,8 @@ python scripts/validation/coverage_audit.py   # orf row must show 7/7, 0 missing
 The standards bar is `scenarios/STANDARDS.md` (AGENT-SURFACE family:
 tool-contract, json-parseable, error-clarity, path-security, exit-codes;
 plus the format-structure anchors the orf-md/orf-xliff scenarios assert).
-Director loop + 10-minute checklist: `docs/dev/validation-director-loop.md`
+Director loop + 10-minute checklist: `suite:docs/dev/validation-director-loop.md`
 in the suite repo. Per-repo validation delivery (run_meta, report card,
-delivery package): `docs/dev/per-repo-validation-delivery.md`. ORF
+delivery package): `suite:docs/dev/per-repo-validation-delivery.md`. ORF
 scenario fixes now live HERE (in `scenarios/`); ORF product-code fixes
 go through the normal fix cycle in this repo.
