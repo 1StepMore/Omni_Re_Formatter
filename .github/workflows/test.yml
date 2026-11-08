@@ -220,4 +220,6 @@ jobs:
         with:
           python-version: "3.13"
       - name: "Blocking: doc-inventory + governance consistency (C1–C7)"
+        env:
+          PYTHONPATH: src   # checker imports <module> from the src layout; no pip install needed (stdlib-only gate)
         run: python scripts/doc_inventory.py --check
