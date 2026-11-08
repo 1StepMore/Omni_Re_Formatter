@@ -206,3 +206,20 @@ jobs:
           OMNI_RATE_LIMIT_RPM: "0"
         run: |
           .venv/bin/python scripts/validation/run_validation.py --module orf --tier 1 --verbose
+  # A13 (agent-governance rectification, 2026-11-08) — doc-truth + governance
+  # consistency gate (C1–C7). Deterministic action → conventional Actions,
+  # never an agentic workflow. Pure stdlib; whole-tree by design so a drifted
+  # claim or a stale inventory cannot slip through a changed-file filter gap.
+  doc-consistency:
+    name: doc-consistency (blocking)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install this repo (editable)
+        run: python -m pip install -e .
+      - name: "Blocking: doc-inventory + governance consistency (C1–C7)"
+        run: python scripts/doc_inventory.py --check

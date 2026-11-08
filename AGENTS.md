@@ -173,3 +173,9 @@ in the suite repo. Per-repo validation delivery (run_meta, report card,
 delivery package): `suite:docs/dev/per-repo-validation-delivery.md`. ORF
 scenario fixes now live HERE (in `scenarios/`); ORF product-code fixes
 go through the normal fix cycle in this repo.
+
+## Role routing (A2 pointer model, 2026-11-08)
+
+角色契约唯一事实源 = 套件根仓 `.agents/roles/`（coder/maintainer/tester/user，各 ≤30 行），本仓不设本地副本。
+进入本仓的 agent：先读套件根 `AGENTS.md` 的 §0 安全与优先级 + 角色路由表，再按指派角色读对应契约；
+期望映射层 = 套件根 `.agents/expectations/`，期望唯一事实源 = `scenarios/STANDARDS.md`（均 Owner 门禁）；standalone clone 按本仓 `docs/` 工作、边界按根 AGENTS.md §0 类推。
