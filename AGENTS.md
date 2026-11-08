@@ -122,6 +122,7 @@ hit most:
 ## Pointers to the suite-level docs
 
 - Cross-module orchestration: [AGENTS.md](https://github.com/1StepMore/e2e-test-suite/blob/main/AGENTS.md)
+- Doc architecture playbook (six-repo synced copy, hash-pinned; e2e-test-suite#254): [`docs/dev/agent-era-doc-architecture.md`](docs/dev/agent-era-doc-architecture.md)
 - MCP tool full parameter reference: [`docs/API.md`](docs/API.md)
 - Pre-commit hooks: [.pre-commit-config.yaml](https://github.com/1StepMore/e2e-test-suite/blob/main/.pre-commit-config.yaml)
 - Compatibility matrix: [COMPATIBILITY.md](https://github.com/1StepMore/e2e-test-suite/blob/main/COMPATIBILITY.md)
