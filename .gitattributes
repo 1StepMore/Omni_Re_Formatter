@@ -1,0 +1,6 @@
+# Cross-repo synced documentation playbook (e2e-test-suite#254). The hash pin
+# in scripts/doc_inventory.py compares working-tree bytes, so this file must
+# check out byte-identical on every platform; this repo's core.autocrlf=true
+# would otherwise rewrite it to CRLF on Windows. AutoInfo/AutoMedia enforce
+# the same rule repo-wide (* text=auto eol=lf).
+docs/dev/agent-era-doc-architecture.md text eol=lf

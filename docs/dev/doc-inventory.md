@@ -7,7 +7,7 @@
 
 | Document | Lines |
 |---|---:|
-| AGENTS.md | 181 |
+| AGENTS.md | 182 |
 | README.md | 398 |
 | docs/API.md | 423 |
 | docs/ARCHITECTURE.md | 500 |
@@ -16,6 +16,7 @@
 | docs/adr/0001-doc-inventory-gate.md | 48 |
 | docs/adr/README.md | 18 |
 | docs/adr/TEMPLATE.md | 29 |
+| docs/dev/agent-era-doc-architecture.md | 300 |
 | docs/dev/converters.md | 51 |
 | docs/dev/mcp-security.md | 107 |
 | docs/dev/production-matrix.md | 58 |
