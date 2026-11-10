@@ -1,0 +1,27 @@
+# 防止 'pinned' 标签 issue 被误关 —— 常开索引 issue 由这一层兜底（e2e-test-suite#256）
+name: pinned-guard
+on:
+  issues:
+    types: [closed]
+jobs:
+  reopen:
+    if: contains(github.event.issue.labels.*.name, 'pinned')
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              state: 'open',
+            });
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: '🔒 This issue carries the `pinned` label — it is a long-lived index issue and must stay open (e2e-test-suite#256). Reopened automatically.',
+            });
