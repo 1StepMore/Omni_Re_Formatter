@@ -8,6 +8,7 @@ additions are explicit and tested.
 """
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import sys
@@ -17,19 +18,54 @@ import pytest
 
 _OL_ROOT = Path(__file__).resolve().parents[1]
 _OL_SRC = _OL_ROOT / "src"
-_VENV = _OL_ROOT.parent / ".venv_ol" / "bin" / "python"
+
+
+def _cli_python() -> Path:
+    """Interpreter for the ORF CLI subprocess, resolved platform-aware.
+
+    See tests/test_apply_xliff_format_validation.py::_cli_python — the
+    suite-level ``.venv_ol/bin/python`` is a Linux ELF that cannot spawn on
+    a Windows-native checkout (WinError 1920); POSIX keeps using it, Windows
+    uses the interpreter running pytest, and a missing interpreter fails
+    loudly instead of being silently substituted.
+    """
+    if sys.platform == "win32":
+        return Path(sys.executable)
+    venv_python = _OL_ROOT.parent / ".venv_ol" / "bin" / "python"
+    if not venv_python.is_file():
+        pytest.fail(
+            f".venv_ol interpreter not found at {venv_python} — the POSIX "
+            f"branch of this suite expects the suite-level venv (CI creates "
+            f"it via symlink); refusing to silently substitute an interpreter",
+            pytrace=False,
+        )
+    return venv_python
+
+
+def _orf_subprocess_env() -> dict:
+    """Env for ORF CLI subprocesses, per platform.
+
+    POSIX keeps the historical minimal env exactly (PYTHONPATH + venv-first
+    PATH with os.pathsep, which is ":" there — the old hardcoded ":").
+    Windows additionally inherits os.environ: the minimal dict omits
+    SystemRoot/SystemDrive, which Windows child processes need for basic
+    runtime initialization.
+    """
+    env = {
+        "PYTHONPATH": str(_OL_SRC),
+        "ORF_MCP_ALLOWED_DIRS": os.environ.get("ORF_MCP_ALLOWED_DIRS", "/tmp"),
+    }
+    if sys.platform == "win32":
+        return {**os.environ, **env}
+    env["PATH"] = str(_cli_python().parent) + os.pathsep + os.environ.get("PATH", "")
+    return env
 
 
 def _run_apply_md_help() -> str:
     """Capture `orf apply-md --help` output."""
-    import os
     result = subprocess.run(
-        [str(_VENV), "-m", "orf", "apply-md", "--help"],
-        capture_output=True, text=True, env={
-            "PYTHONPATH": str(_OL_SRC),
-            "PATH": str(_VENV.parent) + ":" + os.environ.get("PATH", ""),
-            "ORF_MCP_ALLOWED_DIRS": os.environ.get("ORF_MCP_ALLOWED_DIRS", "/tmp"),
-        },
+        [str(_cli_python()), "-m", "orf", "apply-md", "--help"],
+        capture_output=True, text=True, env=_orf_subprocess_env(),
         timeout=15,
     )
     return result.stdout + result.stderr
@@ -74,17 +110,12 @@ class TestApplyMdTargetFormatChoice:
 
     def test_invalid_format_rejected(self):
         """A bogus target format must be rejected (click BadParameter)."""
-        import os
         result = subprocess.run(
-            [str(_VENV), "-m", "orf", "apply-md",
+            [str(_cli_python()), "-m", "orf", "apply-md",
              "test_fixtures/zh/haier.epub",
              "--target-format", "bogus_format",
              "--output", "/tmp/bogus.out"],
-            capture_output=True, text=True, env={
-                "PYTHONPATH": str(_OL_SRC),
-                "PATH": str(_VENV.parent) + ":" + os.environ.get("PATH", ""),
-                "ORF_MCP_ALLOWED_DIRS": os.environ.get("ORF_MCP_ALLOWED_DIRS", "/tmp"),
-            },
+            capture_output=True, text=True, env=_orf_subprocess_env(),
             timeout=15,
         )
         assert result.returncode != 0

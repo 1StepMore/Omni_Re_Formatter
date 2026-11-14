@@ -97,8 +97,11 @@ class TestS3ResourceClient:
         result = client.download("test-key", Path("/tmp/dest"))
 
         assert result is True
+        # The client forwards str(dest); the platform renders the same
+        # logical path with its own separators ("\\tmp\\dest" on Windows),
+        # so derive the expectation from Path instead of a literal.
         mock_client.download_file.assert_called_once_with(
-            "test-bucket", "test/prefix/test-key", "/tmp/dest"
+            "test-bucket", "test/prefix/test-key", str(Path("/tmp/dest"))
         )
 
     def test_download_failure(self, s3_client):
