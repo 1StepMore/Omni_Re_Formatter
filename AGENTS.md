@@ -180,3 +180,16 @@ go through the normal fix cycle in this repo.
 角色契约唯一事实源 = 套件根仓 `.agents/roles/`（coder/maintainer/tester/user，各 ≤30 行），本仓不设本地副本。
 进入本仓的 agent：先读套件根 `AGENTS.md` 的 §0 安全与优先级 + 角色路由表，再按指派角色读对应契约；
 期望映射层 = 套件根 `.agents/expectations/`，期望唯一事实源 = `scenarios/STANDARDS.md`（均 Owner 门禁）；standalone clone 按本仓 `docs/` 工作、边界按根 AGENTS.md §0 类推。
+
+## 运行环境与门禁速查（harness 用 · 2026-11-14 核对）
+
+| 项 | 内容 |
+|:--|:--|
+| 解释器 | uv 工程：`uv run` 优先；Windows 原生 `.venv_win\Scripts\python.exe`（套件 `setup_dev.ps1` 建） |
+| 安装 | `uv sync --all-extras`（dev extra 含转换/排版依赖） |
+| 必需密钥 | **无**（纯机械转换，不要给本仓加任何 key 相关代码或配置） |
+| DoD 顺序 | `make test` → `make lint`；三模块联合验证在套件仓跑 |
+| 已知坑 | ① `channels` 相关断言最容易因模板改动而红，先看是不是"预期变了"而不是"代码错了"；② Windows 原生首跑有 63 个测试红（#90，缺依赖/路径假设类）；③ 改成员依赖不重建套件根 `uv.lock` ⇒ OPP 的 `validate` 红 |
+| 队列 | `gh issue list -l agent-ready --state open` |
+
+> 本块是**本仓运行事实的唯一真身**（Owner 侧的通用执行提示词不写具体仓信息）。通用规则（边界 / 权限 / 合并判定）见 Owner 侧提示词，不入库。
