@@ -25,11 +25,11 @@ def _deterministic_pandoc_env(source_path: Path) -> dict[str, str]:
 
     Pandoc stamps EPUB metadata (``dcterms:modified``, the ``dc:date``
     fallback) and every zip member with the wall clock, so two runs of the
-    same conversion produced different EPUB bytes. Unlike the DOCX
-    channel's mtime-based pin (``md2docx._deterministic_pandoc_env``), the
-    epoch derives from the INPUT CONTENT: apply-md stages every conversion
-    through a fresh temp sibling whose mtime changes per run, so an
-    mtime-derived pin would break cross-directory reproducibility.
+    same conversion produced different EPUB bytes. The epoch derives from
+    the INPUT CONTENT (same mechanism as the DOCX channel,
+    ``md2docx._deterministic_pandoc_env``): apply-md stages every
+    conversion through a fresh temp sibling whose mtime changes per run,
+    so an mtime-derived pin would break cross-directory reproducibility.
     """
     env = dict(os.environ)
     try:

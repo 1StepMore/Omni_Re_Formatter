@@ -34,16 +34,23 @@ _OLIMG_GLOB = "OLIMG_*"
 
 
 def _deterministic_pandoc_env(source_path: Path) -> dict[str, str]:
-    """Env for pandoc with SOURCE_DATE_EPOCH pinned to the source mtime.
+    """Env for pandoc with SOURCE_DATE_EPOCH derived from the input bytes.
 
     Pandoc stamps ``docProps/core.xml`` (and its archive entries) with the
     wall clock, so two runs of the same conversion produced different DOCX
-    bytes. Pinning SOURCE_DATE_EPOCH to a value derived from the source file
-    makes the output reproducible for the same input.
+    bytes. The epoch derives from the INPUT CONTENT (same mechanism as the
+    EPUB channel, ``md2epub._deterministic_pandoc_env``): an mtime-based
+    pin made the DOCX bytes a function of the source file's mtime, and
+    apply-md stages every conversion through a fresh temp sibling whose
+    mtime changes per run — so re-building the same content in a suite or
+    a different directory yielded different bytes. A content-derived epoch
+    is invariant to the filesystem, mtimes, timezone and rebuilds:
+    identical content packs to identical DOCX bytes.
     """
     env = dict(os.environ)
     try:
-        env["SOURCE_DATE_EPOCH"] = str(int(source_path.stat().st_mtime))
+        digest = hashlib.sha256(source_path.read_bytes()).hexdigest()
+        env["SOURCE_DATE_EPOCH"] = str(int(digest[:8], 16) % (2**31 - 1))
     except OSError:
         pass
     return env
