@@ -25,9 +25,19 @@ from orf.mcp.security import PathValidator
 
 
 @pytest.fixture
-def validator():
+def validator(tmp_path):
+    """PathValidator whose allowlist anchors to the real OS temp root.
+
+    The historical literal ``["/tmp", "/var/tmp"]`` is a POSIX convention:
+    on Windows the checked files live under the user's temp dir
+    (``C:\\Users\\...\\AppData\\Local\\Temp\\...``), so PathValidator
+    rejected them with not-within-allowed before the extension check this
+    file exists to exercise could even run. Anchoring the allowlist to the
+    same root the checked files live in (pytest's per-test ``tmp_path``)
+    keeps the test about extensions on every platform.
+    """
     return PathValidator(
-        allowed_directories=["/tmp", "/var/tmp"],
+        allowed_directories=[str(tmp_path)],
         max_file_size_bytes=100_000_000,
     )
 

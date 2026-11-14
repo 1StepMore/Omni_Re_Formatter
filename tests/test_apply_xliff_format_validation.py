@@ -10,13 +10,39 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
 import pytest
 
 _ORF_SRC = Path(__file__).resolve().parents[1] / "src"
-_VENV_PYTHON = Path(__file__).resolve().parents[2] / ".venv_ol" / "bin" / "python"
+
+
+def _cli_python() -> Path:
+    """Interpreter for the ORF CLI subprocess, resolved platform-aware.
+
+    The historical module constant hardcoded the suite-level Linux venv
+    (``../../.venv_ol/bin/python``). That file is a Linux ELF: on a
+    Windows-native checkout it is absent (or cannot be spawned — WinError
+    1920), so every subprocess died before ``orf`` even started. POSIX runs
+    (CI/WSL, which create the .venv_ol this suite expects — see
+    .github/workflows/test.yml "Create .venv_ol symlinks") keep using it
+    unchanged; Windows uses the interpreter running pytest, which has the
+    same dev extra installed. A missing interpreter fails loudly instead of
+    being silently substituted.
+    """
+    if sys.platform == "win32":
+        return Path(sys.executable)
+    venv_python = Path(__file__).resolve().parents[2] / ".venv_ol" / "bin" / "python"
+    if not venv_python.is_file():
+        pytest.fail(
+            f".venv_ol interpreter not found at {venv_python} — the POSIX "
+            f"branch of this suite expects the suite-level venv (CI creates "
+            f"it via symlink); refusing to silently substitute an interpreter",
+            pytrace=False,
+        )
+    return venv_python
 
 
 def _run_orf_cli(*args: str) -> subprocess.CompletedProcess:
@@ -29,7 +55,7 @@ def _run_orf_cli(*args: str) -> subprocess.CompletedProcess:
     before them in the same job. Give every invocation its own cache root to keep
     them order-independent.
     """
-    cmd = [str(_VENV_PYTHON), "-m", "orf", *args]
+    cmd = [str(_cli_python()), "-m", "orf", *args]
     with tempfile.TemporaryDirectory(prefix="orf-cli-cache-") as cache_dir:
         env = {
             **os.environ,

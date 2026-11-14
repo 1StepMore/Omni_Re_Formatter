@@ -1,5 +1,6 @@
 """XLIFF to HTML channel tests."""
 
+import sys
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
@@ -7,6 +8,42 @@ import pytest
 from orf.channels.xliff2html import XLIFF2HTMLConverter
 from orf.converters.options import ConverterOptions
 from orf.converters.base import ConversionResult
+
+
+def _deny_file_read(path: Path):
+    """Make ``path`` unreadable for the duration of a test, per platform.
+
+    POSIX: chmod(0o000). Windows: NTFS has no POSIX read bits (chmod(0o000)
+    is a no-op — measured: read_text() still succeeds), so instead hold the
+    file open with an exclusive (share-none) handle; the kernel then fails
+    every other open with a sharing violation, which Python surfaces as
+    PermissionError — the same exception class POSIX chmod produces. The
+    caller must invoke the returned closure to release the handle before
+    tmp_path cleanup.
+    """
+    if sys.platform != "win32":
+        path.chmod(0o000)
+
+        def restore():
+            path.chmod(0o644)
+
+        return restore
+    import ctypes
+
+    GENERIC_READ = 0x80000000
+    OPEN_EXISTING = 3
+    INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
+    handle = ctypes.windll.kernel32.CreateFileW(
+        str(path), GENERIC_READ, 0, None, OPEN_EXISTING, 0, None,
+    )
+    assert handle not in (INVALID_HANDLE_VALUE, 0), (
+        f"could not open exclusive handle on {path}"
+    )
+
+    def restore():
+        ctypes.windll.kernel32.CloseHandle(ctypes.c_void_p(handle))
+
+    return restore
 
 
 @pytest.fixture
@@ -133,14 +170,14 @@ class TestXLIFF2HTMLConverter:
         output = tmp_path / "output.html"
         html_file = tmp_path / "unreadable.html"
         html_file.write_text("test", encoding="utf-8")
-        html_file.chmod(0o000)
+        release = _deny_file_read(html_file)
         converter = XLIFF2HTMLConverter()
         try:
             result = converter.convert(html_file, sample_xliff, output)
             assert result.success is False
             assert "Failed to read HTML template" in result.errors[0].message
         finally:
-            html_file.chmod(0o644)
+            release()
 
     def test_convert_write_error(self, sample_html_template: Path, sample_xliff: Path, tmp_path: Path):
         output = tmp_path / "subdir" / "output.html"
