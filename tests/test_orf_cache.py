@@ -55,9 +55,17 @@ def fake_cache_dir(tmp_path, monkeypatch):
     The production cache helpers must read this env var at call-time
     (not at module import) so the fixture sets it before each test and
     the ORF module resolves the cache root to ``tmp_path / "omni_cache"``.
+
+    Also clears ``OMNI_TEST_FAKE_PANDOC``: these tests exercise the cache
+    through the CLI entry point, and since issue #429 the fake-pandoc seam
+    deliberately disables caching (a stub's output must never be cached).
+    CI exports that env var job-wide, which would otherwise disable the very
+    behavior under test. These cells mock the converter, so no real pandoc
+    runs either way.
     """
     cache_root = tmp_path / "omni_cache"
     monkeypatch.setenv("OMNI_CACHE_DIR", str(cache_root))
+    monkeypatch.delenv("OMNI_TEST_FAKE_PANDOC", raising=False)
     yield cache_root
 
 

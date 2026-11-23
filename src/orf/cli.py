@@ -55,14 +55,22 @@ def _cache_root() -> Path:
     return root
 
 
+# Set by _maybe_install_fake_pandoc() once the stub is actually installed.
+# Deliberately NOT read from the env var: test jobs export
+# OMNI_TEST_FAKE_PANDOC=1 process-wide (e2e contract-tests.yml) while calling
+# cache helpers directly, never going through main(). Keying the cache off the
+# env var alone disabled caching for those tests too (issue #429).
+_FAKE_PANDOC_ACTIVE = False
+
+
 def _cache_enabled() -> bool:
     """Fake-pandoc runs must never read or write the shared cache (issue #429).
 
-    ``OMNI_TEST_FAKE_PANDOC=1`` swaps pandoc for a fixed-template stub, so its
-    output carries no relation to the input. Caching it poisons real runs that
-    later hit the same content key.
+    The fake seam replaces pandoc with a fixed-template stub, so its output
+    carries no relation to the input. Caching it poisons real runs that later
+    hit the same content key. Only the *installed* stub disables the cache.
     """
-    return os.environ.get("OMNI_TEST_FAKE_PANDOC") != "1"
+    return not _FAKE_PANDOC_ACTIVE
 
 
 def _hash_file(path: Path) -> str:
@@ -252,6 +260,7 @@ def _maybe_install_fake_pandoc() -> None:
     except ImportError:
         return
 
+    global _FAKE_PANDOC_ACTIVE
     _fake_runner = _FakePandocRunner()
     _original_run = _subprocess.run
 
@@ -266,6 +275,7 @@ def _maybe_install_fake_pandoc() -> None:
         return _original_run(*args, **kwargs)
 
     _subprocess.run = _patched_run
+    _FAKE_PANDOC_ACTIVE = True
 
 
 def _load_dotenv_for_orf(env_path: Path) -> None:
