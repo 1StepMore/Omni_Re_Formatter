@@ -234,7 +234,8 @@ def _sanitize_for_json(obj: Any) -> Any:
     help="日志输出格式: 'console' (默认) 或 'json'。也可通过 OMNI_LOG_FORMAT 环境变量设置。",
 )
 @click.option("--load-dotenv", is_flag=True, default=False, help="Load .env file before running (opt-in)")
-def main(verbose: bool, log_format: str | None = None, load_dotenv: bool = False) -> None:
+@click.pass_context
+def main(ctx: click.Context, verbose: bool, log_format: str | None = None, load_dotenv: bool = False) -> None:
     """ORF - Omni-Re-Formatter: 将本地化后的 MD/XLIFF 还原为目标复杂格式。"""
     if load_dotenv or os.environ.get("ORF_AUTOLOAD_DOTENV") == "1":
         _load_env_for_orf()
@@ -243,6 +244,17 @@ def main(verbose: bool, log_format: str | None = None, load_dotenv: bool = False
         os.environ["OMNI_LOG_FORMAT"] = log_format
     setup_logger(level=log_level)
     _maybe_install_fake_pandoc()
+    # The cache gate is process-global state, so it must not outlive this
+    # invocation: a test suite that invokes the CLI once and then exercises
+    # the cache helpers directly (test_orf_cache.py) would otherwise inherit
+    # FAKE_PANDOC_ACTIVE and see every cache write silently skipped.
+    ctx.call_on_close(_reset_fake_pandoc_active)
+
+
+def _reset_fake_pandoc_active() -> None:
+    """Clear the cache gate once the CLI invocation ends (see main())."""
+    global _FAKE_PANDOC_ACTIVE
+    _FAKE_PANDOC_ACTIVE = False
 
 
 def _maybe_install_fake_pandoc() -> None:
