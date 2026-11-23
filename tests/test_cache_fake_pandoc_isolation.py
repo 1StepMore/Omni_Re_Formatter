@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 
+import orf.cli as orf_cli
 from orf.cli import _check_cache, _write_cache
 
 FAKE_KEY = "deadbeef" * 8  # 64-char sha256-shaped cache key
@@ -34,8 +35,13 @@ def _cached_file(cache_dir: Path, ext: str) -> Path:
 def test_fake_pandoc_disables_cache_read(
     cache_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Under OMNI_TEST_FAKE_PANDOC=1 a pre-seeded cache entry is ignored."""
-    monkeypatch.setenv("OMNI_TEST_FAKE_PANDOC", "1")
+    """With the fake-pandoc stub installed a pre-seeded cache entry is ignored.
+
+    Gate on the module flag (set only when the stub is really installed), not on
+    the env var: CI exports OMNI_TEST_FAKE_PANDOC process-wide for the ORF test
+    job, but those runs never go through main(), so the cache stays live.
+    """
+    monkeypatch.setattr(orf_cli, "_FAKE_PANDOC_ACTIVE", True)
     cached = _cached_file(cache_dir, ".docx")
     cached.parent.mkdir(parents=True)
     cached.write_bytes(b"poisoned fake-pandoc output")
@@ -50,8 +56,8 @@ def test_fake_pandoc_disables_cache_read(
 def test_fake_pandoc_disables_cache_write(
     cache_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Under OMNI_TEST_FAKE_PANDOC=1 nothing is written into the cache."""
-    monkeypatch.setenv("OMNI_TEST_FAKE_PANDOC", "1")
+    """With the fake-pandoc stub installed nothing is written into the cache."""
+    monkeypatch.setattr(orf_cli, "_FAKE_PANDOC_ACTIVE", True)
     output_path = tmp_path / "out.docx"
     output_path.write_bytes(b"fake template content")
 
@@ -61,8 +67,11 @@ def test_fake_pandoc_disables_cache_write(
     assert not orf_dir.exists() or not any(orf_dir.iterdir())
 
 
-def test_real_mode_still_caches(cache_dir: Path, tmp_path: Path) -> None:
-    """Without the fake-pandoc env, cache write stores the file for reuse."""
+def test_real_mode_still_caches(
+    cache_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Without the stub installed, cache write stores the file for reuse."""
+    monkeypatch.setattr(orf_cli, "_FAKE_PANDOC_ACTIVE", False)
     output_path = tmp_path / "out.docx"
     output_path.write_bytes(b"real converted content")
 
