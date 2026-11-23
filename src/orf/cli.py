@@ -55,6 +55,16 @@ def _cache_root() -> Path:
     return root
 
 
+def _cache_enabled() -> bool:
+    """Fake-pandoc runs must never read or write the shared cache (issue #429).
+
+    ``OMNI_TEST_FAKE_PANDOC=1`` swaps pandoc for a fixed-template stub, so its
+    output carries no relation to the input. Caching it poisons real runs that
+    later hit the same content key.
+    """
+    return os.environ.get("OMNI_TEST_FAKE_PANDOC") != "1"
+
+
 def _hash_file(path: Path) -> str:
     """SHA-256 hex digest of a file, read in 8192-byte chunks (avoids loading the entire file into memory).
 
@@ -118,6 +128,8 @@ def _cache_key_apply_xliff(
 
 def _check_cache(cache_key: str, output_path: Path, ext: str, no_cache: bool = False) -> bool:
     """If cached, copy to ``output_path`` and return True. Honors ``--no-cache``."""
+    if not _cache_enabled():
+        return False
     if no_cache:
         return False
     cache_file = _cache_root() / f"{cache_key}{ext}"
@@ -131,13 +143,21 @@ def _check_cache(cache_key: str, output_path: Path, ext: str, no_cache: bool = F
 
 def _write_cache(cache_key: str, output_path: Path, ext: str, no_cache: bool = False) -> None:
     """Copy ``output_path`` into the cache for next run. Honors ``--no-cache``."""
+    if not _cache_enabled():
+        return
     if no_cache:
         return
     if not output_path.exists():
         return
     cache_file = _cache_root() / f"{cache_key}{ext}"
     cache_file.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    shutil.copy(output_path, cache_file)
+    tmp_file = cache_file.with_suffix(cache_file.suffix + ".tmp")
+    try:
+        shutil.copy(output_path, tmp_file)
+        os.replace(tmp_file, cache_file)  # atomic replace: no half-written file on interrupt
+    finally:
+        if tmp_file.exists():
+            tmp_file.unlink(missing_ok=True)
     _cache_logger.debug(f"Cache miss: wrote {cache_file}")
 
 
