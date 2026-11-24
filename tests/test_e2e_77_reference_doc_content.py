@@ -17,6 +17,38 @@ import json
 import io
 import zipfile
 
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _isolated_cwd(tmp_path, monkeypatch):
+    """Run each test with cwd and the MCP allowlist pinned to ``tmp_path``.
+
+    ``apply_md`` writes inline content/reference docs into ``Path.cwd()``
+    and validates them against the allowlist. Pinning both to ``tmp_path``
+    keeps these tests independent of the repository root's contents
+    (issue #99) and of ambient ``MCP_ALLOWED_DIRECTORIES`` in the
+    developer's shell, which takes precedence over
+    ``ORF_MCP_ALLOWED_DIRS``.
+    """
+    import orf.mcp.common as mcp_common
+
+    saved_config = mcp_common._config
+    saved_validator = mcp_common._path_validator
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("MCP_ALLOWED_DIRECTORIES", raising=False)
+    monkeypatch.setenv("ORF_MCP_ALLOWED_DIRS", str(tmp_path))
+    mcp_common.reset_config_and_validator()
+    yield
+    # Restore the pre-test cached singletons by assignment instead of
+    # leaving the cache empty: monkeypatch undoes the env vars only
+    # *after* this teardown, so a lazily rebuilt validator would carry a
+    # stale identity and break downstream tests that patch the instance
+    # that existed before this file ran (e.g. the allow_tmp_paths
+    # fixture in test_mcp_images_json_canonical_shape.py).
+    mcp_common._config = saved_config
+    mcp_common._path_validator = saved_validator
+
 
 def _minimal_docx_b64() -> str:
     buf = io.BytesIO()

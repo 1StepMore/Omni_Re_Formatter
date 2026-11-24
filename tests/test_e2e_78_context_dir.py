@@ -7,21 +7,44 @@ from __future__ import annotations
 
 import json
 import os
-import sys
-from pathlib import Path
+
+import pytest
 
 
-# Ensure tests are run from a dir where ORF PathValidator allows writes
-# (tests exercise context_dir against the CWD).
-EXPECTED_CWD = str(Path.cwd())
+@pytest.fixture(autouse=True)
+def isolated_mcp_cwd(tmp_path, monkeypatch):
+    """Run each test with cwd and the MCP allowlist pinned to ``tmp_path``.
 
-# MUST run before any orf.mcp.* import: path_validator is a module-level
-# singleton in orf.mcp.common that reads ORF_MCP_ALLOWED_DIRS at import.
-if "ORF_MCP_ALLOWED_DIRS" not in os.environ:
-    os.environ["ORF_MCP_ALLOWED_DIRS"] = EXPECTED_CWD
+    The tool writes inline content into ``Path.cwd()`` and validates all
+    paths against the allowlist. Pinning both keeps these tests
+    independent of the repository root's contents (issue #99) and of
+    ambient ``MCP_ALLOWED_DIRECTORIES`` in the developer's shell, which
+    takes precedence over ``ORF_MCP_ALLOWED_DIRS``.
+    """
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("MCP_ALLOWED_DIRECTORIES", raising=False)
+    monkeypatch.setenv("ORF_MCP_ALLOWED_DIRS", str(tmp_path))
+
+    import orf.mcp.common as mcp_common
+
+    saved_config = mcp_common._config
+    saved_validator = mcp_common._path_validator
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("MCP_ALLOWED_DIRECTORIES", raising=False)
+    monkeypatch.setenv("ORF_MCP_ALLOWED_DIRS", str(tmp_path))
+    mcp_common.reset_config_and_validator()
+    yield tmp_path
+    # Restore the pre-test cached singletons by assignment instead of
+    # leaving the cache empty: monkeypatch undoes the env vars only
+    # *after* this teardown, so a lazily rebuilt validator would carry a
+    # stale identity and break downstream tests that patch the instance
+    # that existed before this file ran (e.g. the allow_tmp_paths
+    # fixture in test_mcp_images_json_canonical_shape.py).
+    mcp_common._config = saved_config
+    mcp_common._path_validator = saved_validator
 
 
-def test_context_dir_resolves_relative_reference_doc():
+def test_context_dir_resolves_relative_reference_doc(tmp_path):
     """When context_dir is set, a relative reference_doc path is resolved
     against context_dir before the path validator runs."""
     from orf.mcp.tools.apply_md import apply_md
@@ -32,31 +55,25 @@ def test_context_dir_resolves_relative_reference_doc():
         captured["args"] = list(args)
         return {"success": True, "output_path": "ctx_out.docx"}
 
+    # Create a context subdir + put a fake reference doc inside
+    ctx_dir = tmp_path / "test_context_dir"
+    ctx_dir.mkdir()
+    ref_name = "fake_ref.docx"
+    ref_path = ctx_dir / ref_name
+    ref_path.write_bytes(b"PK\x03\x04fake")  # fake docx bytes
+
     orig = srv._run_cli_command
     srv._run_cli_command = fake_run
     try:
-        # Create a context subdir + put a fake reference doc inside
-        ctx_dir = "test_context_dir"
-        os.makedirs(ctx_dir, exist_ok=True)
-        ref_name = "fake_ref.docx"
-        ref_path = os.path.join(ctx_dir, ref_name)
-        with open(ref_path, "wb") as f:
-            f.write(b"PK\x03\x04fake")  # fake docx bytes
-
         result = apply_md(
             content="# Hello",
             target_format="docx",
             reference_doc=ref_name,  # relative path
-            context_dir=EXPECTED_CWD,
+            context_dir=str(tmp_path),
             output_path="ctx_out.docx",
         )
     finally:
         srv._run_cli_command = orig
-        # Cleanup
-        if os.path.exists(ref_path):
-            os.unlink(ref_path)
-        if os.path.exists(ctx_dir):
-            os.rmdir(ctx_dir)
 
     data = json.loads(result)
     assert data["success"] is True, f"unexpected result: {data}"
@@ -64,20 +81,19 @@ def test_context_dir_resolves_relative_reference_doc():
     # The --reference-doc arg should be the absolute path, not the relative
     ref_idx = captured["args"].index("--reference-doc")
     ref_arg = captured["args"][ref_idx + 1]
-    assert ref_arg == os.path.join(EXPECTED_CWD, ref_name), (
+    assert ref_arg == os.path.join(str(tmp_path), ref_name), (
         f"context_dir did not resolve relative path. got: {ref_arg}"
     )
 
 
-def test_context_dir_absolute_path_unchanged():
+def test_context_dir_absolute_path_unchanged(tmp_path):
     """Absolute paths win over context_dir (don't get re-prepended)."""
     from orf.mcp.tools.apply_md import apply_md
     from orf.mcp import server as srv
 
     # Create a real ref file so the path validation passes
-    ref_abs = os.path.join(EXPECTED_CWD, "_test_absolute_ref.docx")
-    with open(ref_abs, "wb") as f:
-        f.write(b"PK\x03\x04fake")
+    ref_abs = tmp_path / "_test_absolute_ref.docx"
+    ref_abs.write_bytes(b"PK\x03\x04fake")
 
     captured = {}
     def fake_run(args, **kwargs):
@@ -93,20 +109,18 @@ def test_context_dir_absolute_path_unchanged():
         result = apply_md(
             content="# Hello",
             target_format="docx",
-            reference_doc=ref_abs,
-            context_dir=EXPECTED_CWD,  # valid (in allowed dirs)
+            reference_doc=str(ref_abs),
+            context_dir=str(tmp_path),  # valid (in allowed dirs)
             output_path="ctx_out.docx",
         )
     finally:
         srv._run_cli_command = orig
-        if os.path.exists(ref_abs):
-            os.unlink(ref_abs)
 
     data = json.loads(result)
     assert data["success"] is True, f"unexpected result: {data}"
     ref_idx = captured["args"].index("--reference-doc")
     ref_arg = captured["args"][ref_idx + 1]
-    assert ref_arg == ref_abs, (
+    assert ref_arg == str(ref_abs), (
         f"absolute path was modified: {ref_arg}"
     )
 
@@ -134,10 +148,8 @@ def test_context_dir_none_uses_path_as_is():
         srv._run_cli_command = orig
 
     data = json.loads(result)
-    # Should fail (path not in allowed dirs) but the failure is
-    # because the relative path is treated as cwd-relative, NOT
-    # because context_dir was applied. Verify the path is the
-    # unmodified relative one.
+    # context_dir stayed None, so the relative path must reach the CLI
+    # unchanged rather than being re-anchored to a context dir.
     ref_idx = captured["args"].index("--reference-doc")
     ref_arg = captured["args"][ref_idx + 1]
     assert ref_arg == "just_relative.docx", (
