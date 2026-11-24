@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import inspect
 import json
-import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -29,9 +28,7 @@ from orf.mcp import server
 
 
 # Use a fake-subprocess pattern so the regression tests don't shell out
-# to a real pandoc/CLI subprocess. Tests work in the real cwd (the
-# module-level PathValidator's allowed_directories is fixed at import
-# time, so we cannot chdir into a tmp_path).
+# to a real pandoc/CLI subprocess.
 _FAKE_CLI_SUCCESS = {
     "success": True,
     "output_path": "/tmp/regression_result.html",
@@ -72,12 +69,40 @@ def _fake_subprocess_run(capture_path_to=None):
     return patch("subprocess.run", side_effect=side_effect)
 
 
-@pytest.fixture
-def cwd_md_file():
-    """Create a real .md file in the actual cwd, yield its path, then
-    clean up so tests don't pollute the repo working tree.
+@pytest.fixture(autouse=True)
+def _isolated_cwd(tmp_path, monkeypatch):
+    """Run each test with cwd and the MCP allowlist pinned to ``tmp_path``.
+
+    ``apply_md`` materialises inline content into ``Path.cwd()``. Running
+    these tests from the repository root used to make the cleanup
+    assertions trip over *other* runs' leftover ``orf_mcp_inline_*``
+    files (issue #99). Pinning the cwd also keeps the allowlist
+    independent of ambient ``MCP_ALLOWED_DIRECTORIES`` in the developer's
+    shell, which takes precedence over ``ORF_MCP_ALLOWED_DIRS``.
     """
-    p = Path.cwd() / "_test_e2e_76_input.md"
+    import orf.mcp.common as mcp_common
+
+    saved_config = mcp_common._config
+    saved_validator = mcp_common._path_validator
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("MCP_ALLOWED_DIRECTORIES", raising=False)
+    monkeypatch.setenv("ORF_MCP_ALLOWED_DIRS", str(tmp_path))
+    mcp_common.reset_config_and_validator()
+    yield
+    # Restore the pre-test cached singletons by assignment instead of
+    # leaving the cache empty: monkeypatch undoes the env vars only
+    # *after* this teardown, so a lazily rebuilt validator would carry a
+    # stale identity and break downstream tests that patch the instance
+    # that existed before this file ran (e.g. the allow_tmp_paths
+    # fixture in test_mcp_images_json_canonical_shape.py).
+    mcp_common._config = saved_config
+    mcp_common._path_validator = saved_validator
+
+
+@pytest.fixture
+def cwd_md_file(tmp_path):
+    """Create a real .md file in the isolated cwd and clean it up."""
+    p = tmp_path / "_test_e2e_76_input.md"
     p.write_text("# existing path-based call", encoding="utf-8")
     try:
         yield p
@@ -89,8 +114,8 @@ def cwd_md_file():
 
 
 @pytest.fixture
-def cwd_output_path():
-    p = Path.cwd() / "_test_e2e_76_output.html"
+def cwd_output_path(tmp_path):
+    p = tmp_path / "_test_e2e_76_output.html"
     try:
         yield str(p)
     finally:
@@ -101,18 +126,18 @@ def cwd_output_path():
 
 
 @pytest.fixture(autouse=True)
-def _cleanup_inline_tempfiles():
+def _cleanup_inline_tempfiles(tmp_path):
     """Best-effort cleanup of any tempfiles the test session may have
-    leaked into cwd (the apply_md function should clean these up
-    automatically, but a failure in cleanup should not cascade to
-    other tests)."""
+    leaked into the isolated cwd (the apply_md function should clean
+    these up automatically, but a failure in cleanup should not cascade
+    to other tests)."""
     yield
-    for p in Path.cwd().glob("_test_e2e_76_*"):
+    for p in tmp_path.glob("_test_e2e_76_*"):
         try:
             p.unlink()
         except FileNotFoundError:
             pass
-    for p in Path.cwd().glob("orf_mcp_inline_*.md"):
+    for p in tmp_path.glob("orf_mcp_inline_*.md"):
         try:
             p.unlink()
         except FileNotFoundError:
@@ -168,7 +193,7 @@ class TestApplyMdAcceptsInlineContent:
             f"Tempfile must be deleted after the call. Still exists: {md_path}"
         )
 
-    def test_tempfile_cleaned_up_after_call(self, cwd_output_path):
+    def test_tempfile_cleaned_up_after_call(self, cwd_output_path, tmp_path):
         """The tempfile holding the inline content must be deleted once
         the CLI call returns, so the agent's working directory doesn't
         accumulate junk files."""
@@ -178,7 +203,7 @@ class TestApplyMdAcceptsInlineContent:
                 target_format="html",
                 output_path=cwd_output_path,
             )
-        leftovers = list(Path.cwd().glob("orf_mcp_inline_*.md"))
+        leftovers = list(tmp_path.glob("orf_mcp_inline_*.md"))
         assert leftovers == [], (
             f"Tempfile cleanup failed. Leftover files: {leftovers}"
         )

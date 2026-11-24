@@ -8,6 +8,19 @@ import os
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _clear_ambient_allowed_dirs(monkeypatch):
+    """Remove ambient allowlist env vars so config tests are hermetic.
+
+    ``MCP_ALLOWED_DIRECTORIES`` (suite-level env, e.g. exported by a
+    developer's shell) takes precedence over ``ORF_MCP_ALLOWED_DIRS`` in
+    ``load_config``. Leaving it set made the fail-CLOSED assertions below
+    fail regardless of what each test set up.
+    """
+    monkeypatch.delenv("MCP_ALLOWED_DIRECTORIES", raising=False)
+    monkeypatch.delenv("ORF_MCP_ALLOWED_DIRS", raising=False)
+
+
 class TestFailClosedAllowedDirs:
     """load_config must raise ValueError when ORF_MCP_ALLOWED_DIRS is unset."""
 

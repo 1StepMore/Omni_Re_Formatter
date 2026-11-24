@@ -159,11 +159,11 @@ class TestC4RejectsImageFilePathArbitraryRead:
                         f"C4 BUG: raw traversal path passed to CLI: {cmd_str}"
                     )
 
-    def test_apply_xliff_accepts_data_base64_only(self, tmp_path):
+    def test_apply_xliff_accepts_data_base64_only(self, tmp_path, monkeypatch):
         """C4: valid data_base64 images must still work."""
-        import os
         from orf.mcp.common import reset_config_and_validator
-        os.environ["ORF_MCP_ALLOWED_DIRS"] = str(tmp_path)
+        monkeypatch.delenv("MCP_ALLOWED_DIRECTORIES", raising=False)
+        monkeypatch.setenv("ORF_MCP_ALLOWED_DIRS", str(tmp_path))
         reset_config_and_validator()
         from orf.mcp import server as orf_mcp
 
@@ -192,6 +192,7 @@ class TestC4RejectsImageFilePathArbitraryRead:
                 images=images,
             )
             result = json.loads(result_str)
+        reset_config_and_validator()
         # Pre-fix this returns success=True. The C4 fix should still allow
         # data_base64 images to work.
         assert result.get("success") is True, (
@@ -244,11 +245,11 @@ class TestC5OutputPathValidation:
             f"C5 BUG: should reject dangerous output_path, got errors: {err_codes}"
         )
 
-    def test_apply_xliff_accepts_safe_output_path(self, tmp_path):
+    def test_apply_xliff_accepts_safe_output_path(self, tmp_path, monkeypatch):
         """C5: a safe output path inside the input dir must still work."""
-        import os
         from orf.mcp.common import reset_config_and_validator
-        os.environ["ORF_MCP_ALLOWED_DIRS"] = str(tmp_path)
+        monkeypatch.delenv("MCP_ALLOWED_DIRECTORIES", raising=False)
+        monkeypatch.setenv("ORF_MCP_ALLOWED_DIRS", str(tmp_path))
         reset_config_and_validator()
         from orf.mcp import server as orf_mcp
 
@@ -270,6 +271,7 @@ class TestC5OutputPathValidation:
                 format="docx",
             )
             result = json.loads(result_str)
+        reset_config_and_validator()
         # Pre-fix, this returns success. C5 fix should not break the happy path.
         assert result.get("success") is True, (
             f"safe output_path should work, got: {result}"
