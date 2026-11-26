@@ -147,7 +147,16 @@ async def _list_tools() -> list[types.Tool]:
                         "items": {"type": "object"},
                         "description": "Optional image placements (OPP images.json shape).",
                     },
-                    "separate_images": {"type": "boolean", "default": True},
+                    "separate_images": {
+                        "type": "boolean",
+                        "default": True,
+                        "description": (
+                            "Whether to extract images into images.zip + "
+                            "images.json alongside the output document "
+                            "(true, default). Set false to decode base64 "
+                            "data URIs inline via Pandoc instead."
+                        ),
+                    },
                     "reference_doc": {
                         "type": "string",
                         "description": "Pandoc reference DOCX for style template.",
@@ -163,12 +172,32 @@ async def _list_tools() -> list[types.Tool]:
                         "type": "string",
                         "description": "Pandoc template path.",
                     },
-                    "title": {"type": "string"},
-                    "author": {"type": "string"},
-                    "lang": {"type": "string"},
-                    "embed_images": {"type": "boolean", "default": False},
-                    "text_only": {"type": "boolean", "default": False},
-                    "max_file_size_mb": {"type": "number"},
+                    "title": {
+                        "type": "string",
+                        "description": "Document title for output metadata (used by EPUB).",
+                    },
+                    "author": {
+                        "type": "string",
+                        "description": "Document author for output metadata (used by EPUB).",
+                    },
+                    "lang": {
+                        "type": "string",
+                        "description": "Document language tag for EPUB metadata (e.g. 'zh', 'en'); CLI default is 'zh' when omitted.",
+                    },
+                    "embed_images": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "Embed images into the EPUB package instead of referencing them externally.",
+                    },
+                    "text_only": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "Produce plain-text output: strip all image references and OLIMG placeholders before conversion.",
+                    },
+                    "max_file_size_mb": {
+                        "type": "number",
+                        "description": "Reject input files larger than this size, in megabytes. Omit for no limit.",
+                    },
                     "traceparent": {
                         "type": "string",
                         "description": "Optional W3C Trace Context traceparent header to make this ORF span a child of an upstream trace (e.g. from OL translate_md_text).",
@@ -234,7 +263,10 @@ async def _list_tools() -> list[types.Tool]:
                         "default": False,
                         "description": "Skip ORF's content-addressed cache.",
                     },
-                    "max_file_size_mb": {"type": "number"},
+                    "max_file_size_mb": {
+                        "type": "number",
+                        "description": "Reject input files larger than this size, in megabytes. Omit for no limit.",
+                    },
                     "traceparent": {
                         "type": "string",
                         "description": "Optional W3C Trace Context traceparent header to make this ORF span a child of an upstream trace (e.g. from OL translate_xliff).",
@@ -312,7 +344,10 @@ async def _list_tools() -> list[types.Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "auth_token": {"type": "string"},
+                    "auth_token": {
+                        "type": "string",
+                        "description": "Shared-secret token; only required when the server sets MCP_SHARED_SECRET, otherwise ignored.",
+                    },
                 },
             },
         ),
