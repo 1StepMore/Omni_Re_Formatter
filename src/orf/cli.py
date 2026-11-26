@@ -169,6 +169,25 @@ def _write_cache(cache_key: str, output_path: Path, ext: str, no_cache: bool = F
     _cache_logger.debug(f"Cache miss: wrote {cache_file}")
 
 
+def _ensure_output_dir(path: Path) -> None:
+    """Create ``path`` as a directory with parents, idempotently (#102).
+
+    A missing output directory used to surface as an unrelated converter
+    error (e.g. "Failed to repack DOCX: [Errno 2] No such file or
+    directory: '<out>'"), sending agents chasing the XLIFF or the input
+    document instead of the directory. Callers pass the *parent* of a
+    file output (apply-md / apply-xliff) or the output directory itself
+    (convert-batch). On failure the error names the directory path and
+    the underlying reason.
+    """
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        raise click.ClickException(
+            f"Failed to create output directory {path}: {e}"
+        )
+
+
 def _clear_orf_cache() -> int:
     """Remove all cached ORF files. Returns the number of files removed."""
     root = _cache_root()

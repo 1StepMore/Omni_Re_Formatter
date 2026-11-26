@@ -155,6 +155,14 @@ def convert_batch(
             click.echo("No files found to convert")
         return
 
+    # Issue #102: create --output-dir up front (mkdir -p) so per-file
+    # conversions don't fail inside converters with unrelated
+    # "No such file or directory" errors.
+    if output_dir:
+        from orf.cli import _ensure_output_dir
+
+        _ensure_output_dir(output_path)
+
     if max_file_size_mb is not None:
         for md_file in md_files:
             size_mb = md_file.stat().st_size / (1024 * 1024)

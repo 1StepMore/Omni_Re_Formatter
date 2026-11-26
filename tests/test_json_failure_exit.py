@@ -43,15 +43,35 @@ def runner() -> CliRunner:
     return CliRunner()
 
 
-def _apply_md_failure(runner: CliRunner, tmp_path: Path):
+def _apply_md_failure(runner: CliRunner, tmp_path: Path, monkeypatch) -> None:
     """Invoke a real, deterministic apply-md failure with --json.
 
-    The target dir does not exist, so the HTML converter fails to write and
-    returns ``success=False`` — no mocks, no pandoc, no LLM.
+    Issue #102: the output parent is now auto-created (mkdir -p), so a
+    missing directory no longer fails the conversion — the failure is
+    injected by stubbing the HTML converter instead (the same mechanism
+    ``test_apply_xliff_generic_failure_exits_nonzero`` below uses). The
+    asserted ``--json`` failure contract is unchanged: stdout carries
+    ``success: false`` and the process exits non-zero.
     """
     md = tmp_path / "in.md"
     md.write_text("# Hello\n\nworld\n", encoding="utf-8")
     output = tmp_path / "missing_dir" / "out.html"
+
+    def _fake_convert(self, input_path, output_path, options=None):
+        return ConversionResult(
+            output_path=Path(output_path),
+            success=False,
+            errors=[
+                ErrorDetail(
+                    code="CONVERSION_ERROR",
+                    message="synthetic conversion failure",
+                )
+            ],
+        )
+
+    from orf.cli import MD2HTMLConverter
+
+    monkeypatch.setattr(MD2HTMLConverter, "convert", _fake_convert)
     return runner.invoke(
         main,
         [
@@ -78,25 +98,29 @@ def _stdout_json(result: Any) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def test_apply_md_json_failure_characterization(runner: CliRunner, tmp_path: Path) -> None:
+def test_apply_md_json_failure_characterization(
+    runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Baseline (pre-fix) JSON contract: stdout parses, success=false.
 
     Passes on the unfixed code and stays green after the fix — the failure
     branch must keep emitting the machine-readable error object.
     """
-    result = _apply_md_failure(runner, tmp_path)
+    result = _apply_md_failure(runner, tmp_path, monkeypatch)
 
     obj = _stdout_json(result)
     assert obj["success"] is False
     assert obj["errors"], "failure JSON must carry at least one error entry"
 
 
-def test_apply_md_json_failure_exits_nonzero(runner: CliRunner, tmp_path: Path) -> None:
+def test_apply_md_json_failure_exits_nonzero(
+    runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Fixed contract: conversion failure + --json exits non-zero.
 
     RED on the unfixed code (exit 0), GREEN after T-01.
     """
-    result = _apply_md_failure(runner, tmp_path)
+    result = _apply_md_failure(runner, tmp_path, monkeypatch)
 
     assert result.exit_code != 0, (
         "apply-md --json on a failed conversion must exit non-zero "
@@ -107,10 +131,10 @@ def test_apply_md_json_failure_exits_nonzero(runner: CliRunner, tmp_path: Path) 
 
 
 def test_apply_md_json_failure_stdout_is_single_json_object(
-    runner: CliRunner, tmp_path: Path
+    runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The failure body is exactly one JSON object — no trailers on stdout."""
-    result = _apply_md_failure(runner, tmp_path)
+    result = _apply_md_failure(runner, tmp_path, monkeypatch)
 
     # json.loads on the whole stdout rejects any trailing non-whitespace.
     obj = _stdout_json(result)
@@ -231,11 +255,15 @@ def test_apply_xliff_generic_failure_exits_nonzero(
 # ---------------------------------------------------------------------------
 
 
-def test_convert_batch_failure_exits_nonzero(runner: CliRunner, tmp_path: Path) -> None:
+def test_convert_batch_failure_exits_nonzero(
+    runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """convert-batch with a failing file exits non-zero (fail_count > 0).
 
-    Each HTML conversion targets a missing output dir, so it fails; the
-    command must not report overall success via a zero exit code.
+    Issue #102: ``--output-dir`` is auto-created now, so the failure is
+    injected by stubbing the HTML converter instead of pointing at a
+    missing output dir. The command must not report overall success via a
+    zero exit code.
 
     RED on the unfixed code (exit 0), GREEN after T-01.
     """
@@ -247,6 +275,22 @@ def test_convert_batch_failure_exits_nonzero(runner: CliRunner, tmp_path: Path) 
         encoding="utf-8",
     )
     missing_out = tmp_path / "missing_out"
+
+    def _fake_convert(self, input_path, output_path):
+        return ConversionResult(
+            output_path=Path(output_path),
+            success=False,
+            errors=[
+                ErrorDetail(
+                    code="CONVERSION_ERROR",
+                    message="synthetic conversion failure",
+                )
+            ],
+        )
+
+    from orf.cli import MD2HTMLConverter
+
+    monkeypatch.setattr(MD2HTMLConverter, "convert", _fake_convert)
 
     result = runner.invoke(
         main,

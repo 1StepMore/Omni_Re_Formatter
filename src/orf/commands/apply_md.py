@@ -140,6 +140,7 @@ def apply_md(
         _cache_key_apply_md,
         _check_cache,
         _write_cache,
+        _ensure_output_dir,
         _error_item_to_dict,
         _error_item_to_str,
         _warning_item_to_dict,
@@ -247,6 +248,11 @@ def apply_md(
             manifest = parse_manifest(manifest_path)
     except ManifestParseError as e:
         logger.warning(f"Failed to parse manifest: {e}")
+
+    # Issue #102: create the output parent (mkdir -p) before anything —
+    # cache copy, staging write or converter — needs it, instead of failing
+    # deep in a converter with an unrelated "No such file or directory".
+    _ensure_output_dir(output_path.parent)
 
     cache_key = _cache_key_apply_md(
         input_path, target_format, manifest_path, effective_template, images_json
