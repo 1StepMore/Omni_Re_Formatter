@@ -85,16 +85,36 @@ def test_convert_batch_json_success_stdout_single_object(
 
 
 def test_convert_batch_json_failure_stdout_single_object(
-    runner: CliRunner, tmp_path: Path
+    runner: CliRunner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A failing batch + ``--json`` → ONE JSON object, non-zero exit.
 
-    Each conversion targets a missing output dir so it fails. Contract:
-    ``#exit-codes`` (non-zero) AND ``#json-parseable`` (single object).
+    Issue #102: ``--output-dir`` is auto-created now, so the failure is
+    injected by stubbing the HTML converter instead of pointing at a
+    missing output dir. Contract: ``#exit-codes`` (non-zero) AND
+    ``#json-parseable`` (single object).
     """
+    from orf.converters.base import ConversionResult, ErrorDetail
+
     src = tmp_path / "src"
     _write_frontmatter_md(src)
     missing_out = tmp_path / "missing_out"
+
+    def _fake_convert(self, input_path, output_path):
+        return ConversionResult(
+            output_path=Path(output_path),
+            success=False,
+            errors=[
+                ErrorDetail(
+                    code="CONVERSION_ERROR",
+                    message="synthetic conversion failure",
+                )
+            ],
+        )
+
+    from orf.cli import MD2HTMLConverter
+
+    monkeypatch.setattr(MD2HTMLConverter, "convert", _fake_convert)
 
     result = runner.invoke(
         main,

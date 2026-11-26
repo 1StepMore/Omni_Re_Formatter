@@ -169,6 +169,7 @@ def apply_xliff(
         _cache_key_apply_xliff,
         _check_cache,
         _write_cache,
+        _require_output_dir,
         _error_item_to_dict,
         _error_item_to_str,
         _warning_item_to_dict,
@@ -271,6 +272,12 @@ def apply_xliff(
                     f"but --format is '{format}'. "
                     + _cross_format_error(detected, format)
                 )
+
+    # Issue #102: a missing output parent used to surface as an unrelated
+    # converter error ("Failed to repack DOCX: [Errno 2] No such file or
+    # directory: '<out>'") with hints pointing at the XLIFF/input. Name the
+    # real cause instead; the directory is not created implicitly.
+    _require_output_dir(output_path.parent, output_json=output_json)
 
     cache_key = _cache_key_apply_xliff(input_path, xliff_path, format, images_json)
     if _check_cache(cache_key, output_path, f".{format}", no_cache=no_cache):
