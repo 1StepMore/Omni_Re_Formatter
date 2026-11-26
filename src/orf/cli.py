@@ -169,23 +169,46 @@ def _write_cache(cache_key: str, output_path: Path, ext: str, no_cache: bool = F
     _cache_logger.debug(f"Cache miss: wrote {cache_file}")
 
 
-def _ensure_output_dir(path: Path) -> None:
-    """Create ``path`` as a directory with parents, idempotently (#102).
+def _require_output_dir(path: Path, *, output_json: bool = False) -> None:
+    """Fail with an actionable message when the output directory is missing (#102).
 
     A missing output directory used to surface as an unrelated converter
     error (e.g. "Failed to repack DOCX: [Errno 2] No such file or
     directory: '<out>'"), sending agents chasing the XLIFF or the input
-    document instead of the directory. Callers pass the *parent* of a
-    file output (apply-md / apply-xliff) or the output directory itself
-    (convert-batch). On failure the error names the directory path and
-    the underlying reason.
+    document instead of the directory.
+
+    The directory is deliberately NOT created here: the documented contract
+    (validation scenario ``tool-orf-json-failure-exit``) is that a missing
+    output directory is a clean failure, not an implicit side effect. Callers
+    pass the *parent* of a file output (apply-md / apply-xliff) or the output
+    directory itself (convert-batch).
     """
-    try:
-        path.mkdir(parents=True, exist_ok=True)
-    except OSError as e:
-        raise click.ClickException(
-            f"Failed to create output directory {path}: {e}"
+    if path.is_dir():
+        return
+    message = (
+        f"Output directory does not exist: {path} — create it first "
+        f"(mkdir -p {path})"
+    )
+    if output_json:
+        click.echo(
+            _safe_json_dumps(
+                {
+                    "success": False,
+                    "output_path": None,
+                    "errors": [
+                        {
+                            "code": "OUTPUT_DIR_MISSING",
+                            "message": message,
+                            "recovery_strategy": None,
+                        }
+                    ],
+                    "warnings": [],
+                    "metadata": {},
+                }
+            )
         )
+        raise SystemExit(1)
+    raise click.ClickException(message)
 
 
 def _clear_orf_cache() -> int:

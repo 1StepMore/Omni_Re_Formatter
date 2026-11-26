@@ -11,11 +11,15 @@ and all three hints pointed at the XLIFF / the input document. The real
 cause — the output parent directory does not exist — never appeared in
 the message, and agents retried against the wrong things.
 
-Fix: apply-md / apply-xliff create the output parent (mkdir -p) and
-convert-batch creates ``--output-dir`` before anything writes; when the
-directory genuinely cannot be created the error names the path and the
-reason. The MCP tools (apply_md / apply_xliff / batch_convert) delegate
-to these CLI commands via ``_run_cli_command``, so they inherit the fix —
+Contract (deliberately unchanged): a missing output directory is a clean
+failure, not an implicit side effect — the suite's validation scenario
+``tool-orf-json-failure-exit`` depends on it. What changes is the message:
+it names the directory and the fix (``mkdir -p <dir>``), never "Failed to
+repack DOCX", and in ``--json`` mode the failure is still exactly one JSON
+object with ``success: false``.
+
+The MCP tools (apply_md / apply_xliff / batch_convert) delegate to these
+CLI commands via ``_run_cli_command``, so they inherit the same message —
 one MCP-level test pins that end to end.
 """
 from __future__ import annotations
@@ -82,53 +86,23 @@ def _make_docx_skeleton(path: Path) -> None:
         )
 
 
+def _assert_missing_dir_error(output: str, missing: Path) -> None:
+    lowered = output.lower()
+    assert "output directory does not exist" in lowered, output
+    assert str(missing) in output, output
+    assert "mkdir -p" in output, output
+    assert "failed to repack" not in lowered, output
+
+
 class TestApplyXliffMissingParentDir:
-    def test_missing_parent_dir_is_created(self, tmp_path):
-        """apply-xliff into a non-existent directory must succeed (mkdir -p).
-
-        Before the fix this exited non-zero with "Failed to repack DOCX:
-        [Errno 2] No such file or directory" and hints blaming the XLIFF
-        and the input document.
-        """
+    def test_missing_parent_dir_names_the_directory(self, tmp_path):
+        """The failure must name the directory, never "Failed to repack DOCX"."""
         skeleton = tmp_path / "input.skeleton.zip"
         _make_docx_skeleton(skeleton)
         xlf = tmp_path / "normal.xlf"
         xlf.write_text(_MINIMAL_XLIFF, encoding="utf-8")
-        output = tmp_path / "orf_out" / "normal_zh.docx"
-
-        runner = CliRunner()
-        result = runner.invoke(
-            main,
-            [
-                "apply-xliff", str(skeleton),
-                "--xliff", str(xlf),
-                "--output", str(output),
-                "--format", "docx",
-            ],
-            catch_exceptions=False,
-        )
-
-        assert result.exit_code == 0, (
-            f"expected rc=0 with auto-created parent dir; got "
-            f"rc={result.exit_code}\n{result.output}"
-        )
-        assert output.exists(), "output file was not written"
-        assert output.stat().st_size > 0
-
-    def test_uncreatable_parent_dir_reports_directory_and_path(self, tmp_path):
-        """When the parent cannot be created, the error must say so.
-
-        A regular *file* occupies the parent path, so mkdir -p cannot
-        succeed. The failure must name "directory" and the path — never
-        the misleading "Failed to repack DOCX".
-        """
-        skeleton = tmp_path / "input.skeleton.zip"
-        _make_docx_skeleton(skeleton)
-        xlf = tmp_path / "normal.xlf"
-        xlf.write_text(_MINIMAL_XLIFF, encoding="utf-8")
-        blocker = tmp_path / "blocker"
-        blocker.write_text("a regular file, not a directory", encoding="utf-8")
-        output = blocker / "out.docx"
+        missing = tmp_path / "orf_out"
+        output = missing / "normal_zh.docx"
 
         runner = CliRunner()
         result = runner.invoke(
@@ -143,25 +117,19 @@ class TestApplyXliffMissingParentDir:
         )
 
         assert result.exit_code != 0, (
-            f"expected non-zero exit when the output dir is uncreatable\n"
-            f"{result.output}"
+            f"expected non-zero exit when the output dir is missing\n{result.output}"
         )
-        assert "directory" in result.output.lower(), result.output
-        assert str(blocker) in result.output, result.output
-        assert "Failed to repack" not in result.output, (
-            f"the misleading repack error must not resurface:\n{result.output}"
-        )
-        assert not output.exists()
+        _assert_missing_dir_error(result.output, missing)
+        assert not output.exists(), "no artifact may be produced"
+        assert not missing.exists(), "the directory must not be created implicitly"
 
 
 class TestApplyMdMissingParentDir:
-    def test_missing_parent_dir_is_created(self, tmp_path):
-        """apply-md into a non-existent directory must succeed (mkdir -p)."""
+    def test_missing_parent_dir_names_the_directory(self, tmp_path):
         md = tmp_path / "hello.md"
         md.write_text(_MD_WITH_FRONTMATTER, encoding="utf-8")
-        # html target: the md2html channel is pandoc-independent, so this
-        # test does not depend on a pandoc install.
-        output = tmp_path / "orf_out" / "hello.html"
+        missing = tmp_path / "orf_out"
+        output = missing / "hello.html"
 
         runner = CliRunner()
         result = runner.invoke(
@@ -174,22 +142,49 @@ class TestApplyMdMissingParentDir:
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, (
-            f"expected rc=0 with auto-created parent dir; got "
-            f"rc={result.exit_code}\n{result.output}"
+        assert result.exit_code != 0, result.output
+        _assert_missing_dir_error(result.output, missing)
+        assert not output.exists()
+
+    def test_json_mode_emits_one_object_with_success_false(self, tmp_path):
+        """--json must keep stdout a single JSON object on this failure."""
+        md = tmp_path / "hello.md"
+        md.write_text(_MD_WITH_FRONTMATTER, encoding="utf-8")
+        missing = tmp_path / "orf_out_json"
+        output = missing / "hello.html"
+
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            [
+                "apply-md", str(md),
+                "--target-format", "html",
+                "--output", str(output),
+                "--json",
+            ],
+            catch_exceptions=False,
         )
-        assert output.exists(), "output file was not written"
+
+        assert result.exit_code == 1, result.output
+        payload = json.loads(result.stdout)
+        assert payload["success"] is False
+        assert payload["errors"][0]["code"] == "OUTPUT_DIR_MISSING"
+        assert str(missing) in payload["errors"][0]["message"]
+        assert not output.exists()
 
 
-class TestConvertBatchMissingOutputDir:
-    def test_missing_output_dir_is_created(self, tmp_path):
-        """convert-batch --output-dir pointing at a new dir must succeed."""
+class TestConvertBatchKeepsPerFileContract:
+    def test_batch_json_still_reports_fail_count(self, tmp_path):
+        """convert-batch keeps its per-file contract: a missing --output-dir
+        fails each conversion and the JSON summary reports fail_count.
+
+        (#102 fixes the single-file apply-md / apply-xliff message; the batch
+        path intentionally keeps the summary shape the suite validates.)
+        """
         input_dir = tmp_path / "md_in"
         input_dir.mkdir()
-        (input_dir / "hello.md").write_text(
-            _MD_WITH_FRONTMATTER, encoding="utf-8"
-        )
-        output_dir = tmp_path / "orf_out_batch"
+        (input_dir / "hello.md").write_text(_MD_WITH_FRONTMATTER, encoding="utf-8")
+        missing = tmp_path / "orf_out_batch"
 
         runner = CliRunner()
         result = runner.invoke(
@@ -197,20 +192,20 @@ class TestConvertBatchMissingOutputDir:
             [
                 "convert-batch", str(input_dir),
                 "--target-format", "html",
-                "--output-dir", str(output_dir),
+                "--output-dir", str(missing),
+                "--json",
             ],
             catch_exceptions=False,
         )
 
-        assert result.exit_code == 0, (
-            f"expected rc=0 with auto-created output dir; got "
-            f"rc={result.exit_code}\n{result.output}"
-        )
-        assert (output_dir / "hello.html").exists()
+        assert result.exit_code != 0, f"stdout: {result.stdout!r}"
+        payload = json.loads(result.stdout)
+        assert payload["fail_count"] == 1
+        assert not (missing / "hello.html").exists()
 
 
 class TestMcpApplyXliffMissingParentDir:
-    """The MCP apply_xliff tool delegates to the CLI; it must inherit the fix."""
+    """The MCP apply_xliff tool delegates to the CLI; it must inherit the message."""
 
     @pytest.fixture(autouse=True)
     def _allowed_dirs(self, tmp_path, monkeypatch):
@@ -226,14 +221,15 @@ class TestMcpApplyXliffMissingParentDir:
         mcp_common._config = saved_config
         mcp_common._path_validator = saved_validator
 
-    def test_mcp_apply_xliff_creates_missing_parent_dir(self, tmp_path):
+    def test_mcp_apply_xliff_reports_missing_directory(self, tmp_path):
         from orf.mcp.tools.apply_xliff import apply_xliff
 
         skeleton = tmp_path / "input.skeleton.zip"
         _make_docx_skeleton(skeleton)
         xlf = tmp_path / "normal.xlf"
         xlf.write_text(_MINIMAL_XLIFF, encoding="utf-8")
-        output = tmp_path / "orf_out_mcp" / "normal_zh.docx"
+        missing = tmp_path / "orf_out_mcp"
+        output = missing / "normal_zh.docx"
 
         result = apply_xliff(
             input_file=str(skeleton),
@@ -243,5 +239,6 @@ class TestMcpApplyXliffMissingParentDir:
         )
         data = json.loads(result)
 
-        assert data.get("success") is True, f"unexpected MCP result: {result}"
-        assert output.exists(), "MCP output file was not written"
+        assert data.get("success") is False, f"unexpected MCP result: {result}"
+        assert "directory" in json.dumps(data, ensure_ascii=False).lower()
+        assert not output.exists()
