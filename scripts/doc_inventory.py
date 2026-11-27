@@ -38,6 +38,16 @@ INVENTORY_PATH = ROOT / "docs" / "dev" / "doc-inventory.md"
 DOC_ARCH_SHA256 = "725316a1fd83fcf68243ab87144f37add67b45275bd5faa31883c2f0bb061807"
 _DOC_ARCH = ROOT / "docs" / "dev" / "agent-era-doc-architecture.md"
 
+#: Role contracts (coder/maintainer/tester/user, 57 lines) live IN this repo at
+#: `.agents/roles/` as a byte-identical copy of the suite-root master
+#: (e2e-test-suite#446, owner ruling 2026-11-28: option B — 契约跟仓走 + 机检防
+#: 漂移). The pin is sha256 over the sorted-`*.md` concatenation of
+#: (filename bytes + EOL-normalized file bytes — CRLF rewritten to LF, so
+#: autocrlf checkouts hash identically); an edit to any role file is a
+#: three-repo sync that bumps every pin together.
+ROLES_SHA256 = "bb21442d5e7718e014bec3b656be732d8988a9a8dae49f682ae24927aa88d438"
+_ROLES_DIR = ROOT / ".agents" / "roles"
+
 # ── 派生源（活体） ──────────────────────────────────────────────────────────
 
 
@@ -497,10 +507,44 @@ def _check_doc_arch(failures: list[str]) -> None:
     )
 
 
+def _check_roles_copy(failures: list[str]) -> None:
+    """Verify `.agents/roles/` stays byte-identical to the pinned master copy.
+
+    Mirrors `_check_doc_arch` on purpose (e2e-test-suite#446 option B): the
+    copy is verified against a constant, not against another checkout, so a
+    standalone clone of this repo still gets the full check.
+    """
+    role_files = sorted(_ROLES_DIR.glob("*.md")) if _ROLES_DIR.is_dir() else []
+    if not role_files:
+        failures.append(
+            f"{_ROLES_DIR.relative_to(ROOT)} missing: the role contracts must be "
+            "synced from the suite-root master (e2e-test-suite .agents/roles/) — "
+            "owner ruling 2026-11-28 (suite#446 option B)"
+        )
+        return
+    digest = hashlib.sha256()
+    for f in role_files:
+        digest.update(f.name.encode())
+        # EOL-normalized: git checkout may rewrite LF↔CRLF on autocrlf
+        # machines, and the pin describes CONTENT, not line endings.
+        digest.update(f.read_bytes().replace(b"\r\n", b"\n"))
+    actual = digest.hexdigest()
+    if actual == ROLES_SHA256:
+        print(f"  {_ROLES_DIR.relative_to(ROOT)}: sha256 matches ROLES_SHA256 -> ok")
+        return
+    failures.append(
+        f"{_ROLES_DIR.relative_to(ROOT)} drifted from the pinned roles master "
+        f"(expected {ROLES_SHA256}, got {actual}). 角色契约副本与钉住版本不同，"
+        "改版 = 三仓同传: edit the suite-root master (.agents/roles/), re-sync "
+        "OPP/OL/ORF, bump every ROLES_SHA256 pin together — suite#446"
+    )
+
+
 def check() -> int:
     failures: list[str] = []
     _check_claims(failures)
     _check_doc_arch(failures)
+    _check_roles_copy(failures)
     skipped = _check_referential_paths(failures)
 
     gov_checks(

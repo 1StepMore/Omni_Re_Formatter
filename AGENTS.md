@@ -1,9 +1,14 @@
 # AGENTS.md — Omni_Re_Formatter (ORF)
 
-Developer + agent context for the **ORF** sub-repo. The suite-level
-[suite-level AGENTS.md](https://github.com/1StepMore/e2e-test-suite/blob/main/AGENTS.md) covers cross-module
-orchestration (OPP → OL → ORF); this file is for working **inside**
-ORF.
+Developer + agent context for the **ORF** sub-repo. ORF is an **independent
+product** (MD → 16 output formats backfill) that runs on its own — it does
+not depend on the suite repo to build, run, or test. The suite repo
+([e2e-test-suite](https://github.com/1StepMore/e2e-test-suite)) is the
+orchestration + integration-verification layer and holds the one shared
+artifact between the three modules: the handoff contract
+[CONTRACT.md](https://github.com/1StepMore/e2e-test-suite/blob/main/CONTRACT.md)
+(changing it requires a three-repo sync). Its suite AGENTS.md covers
+cross-module orchestration; this file is for working **inside** ORF.
 
 > ORF is the backfill step of the Omni Suite pipeline. OPP extracts
 > documents to MD + XLIFF, OL translates them, ORF re-injects the
@@ -175,21 +180,20 @@ delivery package): `suite:docs/dev/per-repo-validation-delivery.md`. ORF
 scenario fixes now live HERE (in `scenarios/`); ORF product-code fixes
 go through the normal fix cycle in this repo.
 
-## Role routing (A2 pointer model, 2026-11-08)
+## Role routing (契约跟仓走 + 机检防漂移, suite#446 option B, 2026-11-28)
 
-角色契约唯一事实源 = 套件根仓 `.agents/roles/`（coder/maintainer/tester/user，各 ≤30 行），本仓不设本地副本。
-进入本仓的 agent：先读套件根 `AGENTS.md` 的 §0 安全与优先级 + 角色路由表，再按指派角色读对应契约；
-期望映射层 = 套件根 `.agents/expectations/`，期望唯一事实源 = `scenarios/STANDARDS.md`（均 Owner 门禁）；standalone clone 按本仓 `docs/` 工作、边界按根 AGENTS.md §0 类推。
+角色契约（coder/maintainer/tester/user，57 行）= 本仓 `.agents/roles/`，与套件根母版字节一致——`scripts/doc_inventory.py` 的 `ROLES_SHA256` 钉住校验；改版 = 改套件根母版 + 三仓同传 + 同步 bump pin。
+进入本仓的 agent：读本仓 `.agents/roles/` 对应契约 + 套件根 `AGENTS.md` 的 §0 安全与优先级 + 角色路由表；期望映射层 = 套件根 `.agents/expectations/`，期望唯一事实源 = `scenarios/STANDARDS.md`（均 Owner 门禁）；standalone clone 按本仓 `docs/` 工作、边界按根 AGENTS.md §0 类推。
 
 ## 运行环境与门禁速查（harness 用 · 2026-11-14 核对）
 
 | 项 | 内容 |
 |:--|:--|
 | 解释器 | uv 工程：`uv run` 优先；Windows 原生 `.venv_win\Scripts\python.exe`（套件 `setup_dev.ps1` 建） |
-| 安装 | `uv sync --all-extras`（dev extra 含转换/排版依赖） |
+| 安装 | 两种模式：**联合模式** `uv sync --all-extras`（dev extra 含转换/排版依赖，成员依赖以套件根 `uv.lock` 为准）；**独立模式** 只 clone 本仓时用本仓 `uv.lock` 同样 `uv sync --all-extras`（ORF#106） |
 | 必需密钥 | **无**（纯机械转换，不要给本仓加任何 key 相关代码或配置） |
 | DoD 顺序 | `make test` → `make lint`；三模块联合验证在套件仓跑 |
-| 已知坑 | ① `channels` 相关断言最容易因模板改动而红，先看是不是"预期变了"而不是"代码错了"；② Windows 原生首跑有 63 个测试红（#90，缺依赖/路径假设类）；③ 改成员依赖不重建套件根 `uv.lock` ⇒ OPP 的 `validate` 红 |
+| 已知坑 | ① `channels` 相关断言最容易因模板改动而红，先看是不是"预期变了"而不是"代码错了"；② Windows 原生首跑有 63 个测试红（#90，缺依赖/路径假设类）——**红数与分类账本在 #90/#106 跟**（分类进行中），逐条对账本定性，别当"已知噪声"；③ 改成员依赖不重建套件根 `uv.lock` ⇒ OPP 的 `validate` 红 |
 | 队列 | `gh issue list -l agent-ready --state open` |
 
 > 本块是**本仓运行事实的唯一真身**（Owner 侧的通用执行提示词不写具体仓信息）。通用规则（边界 / 权限 / 合并判定）见 Owner 侧提示词，不入库。
