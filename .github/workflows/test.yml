@@ -177,7 +177,12 @@ jobs:
 
       - name: uv sync (root workspace)
         working-directory: suite
-        run: uv sync --locked
+        run: |
+          if ! uv sync --locked; then
+            echo "::error::套件根 uv.lock 与本仓 pyproject 不一致 —— 通常不是本仓的 bug。"
+            echo "::error::lock 文件在 e2e-test-suite 仓，本仓改不了。修法：clone e2e-test-suite，跑 'UV_NO_CONFIG=1 uv lock'（本机 ~/.config/uv/uv.toml 配了国内镜像，不带 UV_NO_CONFIG 会把整份 lock 的 URL 全改写），在套件仓开 PR 合入后重跑本 job。机制见 e2e-test-suite#453。"
+            exit 1
+          fi
 
       - name: Create .venv_ol symlink for legacy paths
         working-directory: suite
