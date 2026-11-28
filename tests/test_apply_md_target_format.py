@@ -19,6 +19,36 @@ import pytest
 _OL_ROOT = Path(__file__).resolve().parents[1]
 _OL_SRC = _OL_ROOT / "src"
 
+_MISSING_SUITE_VENV = (
+    "requires suite layout: {path} missing "
+    "(run from e2e-test-suite workspace)"
+)
+
+
+def _suite_venv_python() -> Path:
+    """Suite-level ``.venv_ol`` interpreter (POSIX runs only).
+
+    ORF#113: a standalone clone has no sibling ``.venv_ol``, so the tests
+    below skip there instead of reporting a layout gap as a product failure.
+    """
+    return _OL_ROOT.parent / ".venv_ol" / "bin" / "python"
+
+
+@pytest.fixture(autouse=True)
+def _requires_suite_venv() -> None:
+    """Skip the CLI-subprocess contract when the suite venv is absent.
+
+    Every test in this module spawns ``orf`` through the suite-level
+    interpreter, which only exists in the e2e-test-suite layout. Inside that
+    layout the tests still really run; standalone (ORF#113) they are skipped
+    so a single-repo run reads 0 failed instead of 4 layout failures.
+    """
+    if sys.platform == "win32":
+        return  # Windows runs the pytest interpreter; nothing is missing.
+    venv_python = _suite_venv_python()
+    if not venv_python.is_file():
+        pytest.skip(_MISSING_SUITE_VENV.format(path=venv_python))
+
 
 def _cli_python() -> Path:
     """Interpreter for the ORF CLI subprocess, resolved platform-aware.
@@ -26,19 +56,14 @@ def _cli_python() -> Path:
     See tests/test_apply_xliff_format_validation.py::_cli_python — the
     suite-level ``.venv_ol/bin/python`` is a Linux ELF that cannot spawn on
     a Windows-native checkout (WinError 1920); POSIX keeps using it, Windows
-    uses the interpreter running pytest, and a missing interpreter fails
-    loudly instead of being silently substituted.
+    uses the interpreter running pytest. A missing POSIX interpreter skips
+    (via ``_requires_suite_venv``) instead of being silently substituted.
     """
     if sys.platform == "win32":
         return Path(sys.executable)
-    venv_python = _OL_ROOT.parent / ".venv_ol" / "bin" / "python"
+    venv_python = _suite_venv_python()
     if not venv_python.is_file():
-        pytest.fail(
-            f".venv_ol interpreter not found at {venv_python} — the POSIX "
-            f"branch of this suite expects the suite-level venv (CI creates "
-            f"it via symlink); refusing to silently substitute an interpreter",
-            pytrace=False,
-        )
+        pytest.skip(_MISSING_SUITE_VENV.format(path=venv_python))
     return venv_python
 
 

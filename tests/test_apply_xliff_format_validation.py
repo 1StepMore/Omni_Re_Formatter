@@ -18,6 +18,21 @@ import pytest
 
 _ORF_SRC = Path(__file__).resolve().parents[1] / "src"
 
+_MISSING_SUITE_VENV = (
+    "requires suite layout: {path} missing "
+    "(run from e2e-test-suite workspace)"
+)
+
+
+def _suite_venv_python() -> Path:
+    """Suite-level ``.venv_ol`` interpreter (POSIX runs only).
+
+    ORF#113: a standalone clone has no sibling ``.venv_ol``, so the tests
+    that spawn the CLI skip there instead of reporting a layout gap as a
+    product failure.
+    """
+    return Path(__file__).resolve().parents[2] / ".venv_ol" / "bin" / "python"
+
 
 def _cli_python() -> Path:
     """Interpreter for the ORF CLI subprocess, resolved platform-aware.
@@ -29,19 +44,15 @@ def _cli_python() -> Path:
     (CI/WSL, which create the .venv_ol this suite expects — see
     .github/workflows/test.yml "Create .venv_ol symlinks") keep using it
     unchanged; Windows uses the interpreter running pytest, which has the
-    same dev extra installed. A missing interpreter fails loudly instead of
-    being silently substituted.
+    same dev extra installed. A missing POSIX interpreter skips here
+    instead of being silently substituted (ORF#113: a standalone clone has
+    no sibling ``.venv_ol``).
     """
     if sys.platform == "win32":
         return Path(sys.executable)
-    venv_python = Path(__file__).resolve().parents[2] / ".venv_ol" / "bin" / "python"
+    venv_python = _suite_venv_python()
     if not venv_python.is_file():
-        pytest.fail(
-            f".venv_ol interpreter not found at {venv_python} — the POSIX "
-            f"branch of this suite expects the suite-level venv (CI creates "
-            f"it via symlink); refusing to silently substitute an interpreter",
-            pytrace=False,
-        )
+        pytest.skip(_MISSING_SUITE_VENV.format(path=venv_python))
     return venv_python
 
 
