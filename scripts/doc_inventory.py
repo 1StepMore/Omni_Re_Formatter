@@ -552,7 +552,7 @@ def check() -> int:
         failures,
         placeholder_files=("AGENTS.md",),
         check_roles=False,
-        check_expectations=False,
+        check_expectations=True,
     )
     gov_role_pointer(ROOT, failures)
 

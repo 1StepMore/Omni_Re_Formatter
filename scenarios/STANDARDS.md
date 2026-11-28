@@ -20,6 +20,50 @@ Thresholds are NOT invented. AGENT-SURFACE bars mirror the suite
 `scenarios/STANDARDS.md`; format engines copy
 `Omni_Re_Formatter/AGENTS.md:101-120` (16 apply-md outputs).
 
+## Evidence admissibility (cross-cutting bar)
+
+Two rules apply in this repo exactly as they do at suite level: a run that
+cannot produce real evidence must never be reported as GREEN.
+
+### Fallbacks are never evidence {#fallbacks-never-evidence}
+
+Deterministic fallbacks — `OMNI_TEST_FAKE_LLM=1`, `OMNI_TEST_FAKE_PANDOC=1`,
+and every seam in this class (`OMNI_TEST_FAKE_*`, monkey-patched engines,
+stub backends) — are **never admissible as quality (HUMAN-QUALITY)
+evidence**. A fallback emits synthetic, deterministic output: a green run
+under one proves the plumbing ran, not that the result meets the
+human-quality bar.
+
+- A verdict produced while a fallback is active MUST be reported as
+  **`invalid`** — a status that can never be summarised as GREEN — or, when
+  no step executed, as `unconfigured` / `skipped`. Never `passed`.
+- The only escape hatch is **contract-only** (`--allow-fake`, suite side):
+  it re-admits a fallback run only when **every** step of the scenario
+  cites an AGENT-SURFACE anchor. One HUMAN-QUALITY citation, one
+  anchor-less step, or an empty step list makes the scenario ineligible.
+- Any produced artifact carrying the fake-echo signature is `invalid`
+  regardless of the escape hatch.
+
+**How to check:** run the same scenario with and without the fallback env
+var set; the fallback run must not report `passed`. Citable as
+`standard: STANDARDS.md#fallbacks-never-evidence`.
+
+### Env gate semantics {#env-gate-semantics}
+
+Gating is **fail-closed**: `unconfigured` is never `passed`.
+
+- Every listed required variable must resolve; a variable present but
+  **empty counts as missing**.
+- An OR group (`requires_env_any` at suite level) resolves when at least
+  one of its variables resolves; an OR group with none resolving fails
+  **closed** — the scenario reports `unconfigured` and executes no steps,
+  so a keyless user never reaches a real LLM call.
+- Absent or empty group declarations keep the AND-only behaviour.
+
+**How to check:** run a scenario with its key unset; expect
+`unconfigured`, zero executed steps, and no LLM call. Citable as
+`standard: STANDARDS.md#env-gate-semantics`.
+
 ## AGENT-SURFACE
 
 Mission axis 1 (draft D13): validation proves every agent-facing surface —
